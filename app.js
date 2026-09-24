@@ -42,6 +42,7 @@ const DEFAULT_STATE = {
     sleepHistory: []
   },
   notes: [],
+  plan: [],
   usage: { dates: [], currentStreak: 0, longestStreak: 0 },
   notifications: [],
   quoteIndex: 0
@@ -572,6 +573,8 @@ function render() {
     case 'tasks': screen.innerHTML = renderTasks(); break;
     case 'habits': screen.innerHTML = renderHabits(); break;
     case 'profile': screen.innerHTML = renderProfile(); break;
+    case 'notes': screen.innerHTML = renderNotes(); break;
+    case 'plan': screen.innerHTML = renderPlan(); break;
     default: screen.innerHTML = renderDashboard();
   }
 }
@@ -697,13 +700,17 @@ function renderDashboard() {
 }
 // ===== TASKS SCREEN =====
 let tasksFilter = 'today';
+let tasksSort = 'time-asc';
+let planViewMonth = null;
 
 function renderTasks() {
   const today = todayISO();
   let filtered = state.tasks;
   if (tasksFilter === 'today') filtered = state.tasks.filter(t => t.date === today);
   else if (tasksFilter === 'done') filtered = state.tasks.filter(t => t.done);
-  filtered = filtered.slice().sort((a, b) => a.time.localeCompare(b.time));
+  if (tasksSort === 'time-asc') filtered = filtered.slice().sort((a, b) => a.time.localeCompare(b.time));
+  else if (tasksSort === 'time-desc') filtered = filtered.slice().sort((a, b) => b.time.localeCompare(a.time));
+  else filtered = filtered.slice().sort((a, b) => Number(a.done) - Number(b.done));
 
   return `<div class="tasks-page">
     <div class="page-header">
@@ -716,6 +723,7 @@ function renderTasks() {
       <button class="filter-chip ${tasksFilter === 'today' ? 'active' : ''}" data-act="filterTasks" data-filter="today">Azi</button>
       <button class="filter-chip ${tasksFilter === 'all' ? 'active' : ''}" data-act="filterTasks" data-filter="all">Toate</button>
       <button class="filter-chip ${tasksFilter === 'done' ? 'active' : ''}" data-act="filterTasks" data-filter="done">Completate</button>
+      <div class="filter-chip${tasksSort === 'time-asc' ? '' : tasksSort === 'time-desc' ? ' sort-desc' : ' sort-done'} sort-chip" data-act="cycleTaskSort">⇅ ${tasksSort === 'time-asc' ? 'Ora ↑' : tasksSort === 'time-desc' ? 'Ora ↓' : 'Status'}</div>
     </div>
     <div class="tasks-list">
       ${filtered.length === 0 ? `<div class="empty-state"><div class="empty-icon">✅</div><p>Niciun task ${tasksFilter === 'today' ? 'azi' : ''}</p><small>Apasa + pentru a adauga</small></div>` : filtered.map(t => `
@@ -732,6 +740,31 @@ function renderTasks() {
           </div>
         </div>
       </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+// ===== NOTES SCREEN =====
+function renderNotes() {
+  return `<div class="notes-page">
+    <div class="page-header">
+      <span class="page-title">Note</span>
+    </div>
+    <div class="note-compose">
+      <textarea class="note-textarea" id="noteCompose" placeholder="Scrie o nota..." rows="3"></textarea>
+      <button class="btn btn-primary note-add-btn" id="noteAddBtn">Adauga</button>
+    </div>
+    <div class="notes-list" id="notesList">
+      ${state.notes.length === 0
+        ? '<div class="empty-state"><div class="empty-icon">📝</div><p>Nicio nota inca</p><small>Scrie prima ta nota mai sus</small></div>'
+        : state.notes.slice().reverse().map(n => `
+        <div class="note-card" data-note-id="${n.id}">
+          <div class="note-card-text">${n.text.replace(/\n/g, '<br>')}</div>
+          <div class="note-card-footer">
+            <span class="note-card-date">${n.date}</span>
+            <button class="note-card-del" data-act="deleteNote" data-id="${n.id}">✕</button>
+          </div>
+        </div>`).join('')}
     </div>
   </div>`;
 }
@@ -788,6 +821,167 @@ function renderHabits() {
       </div>
     </div>
   </div>`;
+}
+
+// ===== PLAN SCREEN =====
+function renderPlan() {
+  const today = new Date();
+  if (!planViewMonth) planViewMonth = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2,'0');
+  const [yr, mo] = planViewMonth.split('-').map(Number);
+  const monthDate = new Date(yr, mo - 1, 1);
+  const monthName = monthDate.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
+  const firstDay = (monthDate.getDay() + 6) % 7;
+  const daysInMonth = new Date(yr, mo, 0).getDate();
+
+  const eventsThisMonth = (state.plan || []).filter(e => e.date.startsWith(planViewMonth));
+  const eventsByDay = {};
+  eventsThisMonth.forEach(e => {
+    const d = parseInt(e.date.split('-')[2]);
+    if (!eventsByDay[d]) eventsByDay[d] = [];
+    eventsByDay[d].push(e);
+  });
+
+  const todayISO2 = todayISO();
+
+  let cells = '';
+  for (let i = 0; i < firstDay; i++) cells += '<div class="plan-cal-cell empty"></div>';
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = yr + '-' + String(mo).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+    const isToday = dateStr === todayISO2;
+    const hasEvents = eventsByDay[d] && eventsByDay[d].length > 0;
+    const dots = hasEvents ? `<div class="plan-cal-dots">${eventsByDay[d].slice(0,3).map(() => '<span class="plan-cal-dot"></span>').join('')}</div>` : '';
+    cells += `<div class="plan-cal-cell${isToday ? ' today' : ''}${hasEvents ? ' has-events' : ''}" data-act="openPlanDay" data-date="${dateStr}">
+      <span class="plan-cal-num">${d}</span>${dots}
+    </div>`;
+  }
+
+  const upcoming = (state.plan || [])
+    .filter(e => e.date >= todayISO2)
+    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+    .slice(0, 20);
+
+  return `<div class="plan-page">
+    <div class="page-header">
+      <span class="page-title">Planificare</span>
+      <button class="icon-btn" data-act="openAddPlanModal" aria-label="Eveniment nou">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="plan-cal-header">
+      <button class="plan-cal-nav" data-act="planPrevMonth">‹</button>
+      <span class="plan-cal-month">${monthName}</span>
+      <button class="plan-cal-nav" data-act="planNextMonth">›</button>
+    </div>
+    <div class="plan-cal-weekdays">
+      ${['Lu','Ma','Mi','Jo','Vi','Sa','Du'].map(d => `<div class="plan-cal-wd">${d}</div>`).join('')}
+    </div>
+    <div class="plan-cal-grid">${cells}</div>
+    <div class="plan-upcoming">
+      <div class="section-title" style="padding:12px 16px 8px">Urmatoare</div>
+      ${upcoming.length === 0
+        ? '<div class="empty-state" style="padding:20px"><div class="empty-icon">📅</div><p>Niciun eveniment planificat</p><small>Apasa + pentru a adauga</small></div>'
+        : upcoming.map(e => `
+        <div class="plan-event-item">
+          <div class="plan-event-emoji">${e.emoji || '📅'}</div>
+          <div class="plan-event-body">
+            <div class="plan-event-title">${e.title}</div>
+            <div class="plan-event-meta">${e.date} · ${e.time}</div>
+          </div>
+          <button class="plan-event-del" data-act="deletePlanEvent" data-id="${e.id}">✕</button>
+        </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+async function schedulePlanNotif(ev) {
+  const extId = state.profile._pushId;
+  if (!extId) return null;
+  const sendAt = new Date(ev.date + 'T' + ev.time + ':00').toISOString();
+  if (new Date(sendAt) <= new Date()) return null;
+  const res = await fetch('/api?action=schedule', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ externalId: extId, title: (ev.emoji || '📅') + ' ' + ev.title, body: 'Astazi la ' + ev.time, sendAt })
+  }).then(r => r.json()).catch(() => ({}));
+  return res.id || null;
+}
+
+function openAddPlanModal(prefillDate) {
+  closeAllModals();
+  const today = todayISO();
+  const { modal, close } = openModal(`
+    <div class="modal-header">
+      <span class="modal-title">Eveniment nou</span>
+      <button class="modal-close" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Titlu</label>
+        <input class="form-input" id="pTitle" placeholder="Ex: Intalnire doctor..." />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Data</label>
+          <input class="form-input" id="pDate" type="date" value="${prefillDate || today}" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Ora</label>
+          <input class="form-input" id="pTime" type="time" value="09:00" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Emoji</label>
+        <div class="emoji-picker" id="pEmojiPicker">
+          ${['📅','🏥','💼','🎂','✈️','🏋️','📞','🎯','💡','🎉'].map(em => `<div class="emoji-opt${em === '📅' ? ' selected' : ''}" data-emoji="${em}">${em}</div>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-close>Anuleaza</button>
+      <button class="btn btn-primary" id="pSaveBtn">Salveaza + Push</button>
+    </div>
+  `);
+
+  let selEmoji = '📅';
+  modal.querySelectorAll('.emoji-opt').forEach(opt => {
+    opt.addEventListener('click', () => {
+      modal.querySelectorAll('.emoji-opt').forEach(o => o.classList.remove('selected'));
+      opt.classList.add('selected');
+      selEmoji = opt.dataset.emoji;
+    });
+  });
+
+  modal.querySelector('#pSaveBtn').addEventListener('click', async () => {
+    const title = modal.querySelector('#pTitle').value.trim();
+    const date = modal.querySelector('#pDate').value;
+    const time = modal.querySelector('#pTime').value;
+    if (!title || !date || !time) { toast('Completeaza toate campurile'); return; }
+    const ev = { id: uid(), title, emoji: selEmoji, date, time, notifId: null };
+    if (!state.plan) state.plan = [];
+    state.plan.push(ev);
+    save();
+    close();
+    render();
+    toast('Eveniment adaugat! 📅');
+    const notifId = await schedulePlanNotif(ev);
+    if (notifId) {
+      ev.notifId = notifId;
+      save();
+      toast('Push programat! 🔔');
+    }
+  });
+}
+
+function deletePlanEvent(id) {
+  const ev = (state.plan || []).find(e => e.id === id);
+  if (!ev) return;
+  if (ev.notifId) {
+    fetch('/api?action=cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ev.notifId }) }).catch(() => {});
+  }
+  state.plan = state.plan.filter(e => e.id !== id);
+  save();
+  render();
+  toast('Eveniment sters');
 }
 
 // ===== PROFILE SCREEN =====
@@ -1728,6 +1922,36 @@ document.addEventListener('click', e => {
       render();
       break;
     case 'nextQuote': nextQuote(); break;
+    case 'deleteNote': {
+      state.notes = state.notes.filter(x => x.id !== id);
+      save();
+      render();
+      break;
+    }
+    case 'cycleTaskSort': {
+      tasksSort = tasksSort === 'time-asc' ? 'time-desc' : tasksSort === 'time-desc' ? 'done' : 'time-asc';
+      render();
+      break;
+    }
+    case 'openAddPlanModal': openAddPlanModal(); break;
+    case 'openPlanDay': openAddPlanModal(el.dataset.date); break;
+    case 'deletePlanEvent': deletePlanEvent(id); break;
+    case 'planPrevMonth': {
+      const [yr, mo] = planViewMonth.split('-').map(Number);
+      const prev = new Date(yr, mo - 2, 1);
+      planViewMonth = prev.getFullYear() + '-' + String(prev.getMonth() + 1).padStart(2,'0');
+      render();
+      break;
+    }
+    case 'planNextMonth': {
+      const [yr, mo] = planViewMonth.split('-').map(Number);
+      const next = new Date(yr, mo, 1);
+      planViewMonth = next.getFullYear() + '-' + String(next.getMonth() + 1).padStart(2,'0');
+      render();
+      break;
+    }
+    case 'goNotes': setTab('notes'); break;
+    case 'goPlan': setTab('plan'); break;
     case 'goProfile': setTab('profile'); break;
     case 'goTasks': setTab('tasks'); break;
     case 'goHabits': setTab('habits'); break;
@@ -1749,8 +1973,19 @@ document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
 
 // FAB handled via data-act delegation above
 
+document.addEventListener('click', e => {
+  const btn = e.target.closest('#noteAddBtn');
+  if (!btn) return;
+  const ta = document.getElementById('noteCompose');
+  const text = ta ? ta.value.trim() : '';
+  if (!text) return;
+  state.notes.push({ id: uid(), text, date: todayISO() });
+  save();
+  render();
+});
+
 // ===== SWIPE NAVIGATION =====
-const TABS = ['dashboard', 'tasks', 'habits', 'profile'];
+const TABS = ['dashboard', 'tasks', 'habits', 'notes', 'plan', 'profile'];
 let swipeStartX = 0, swipeStartY = 0, swipeActive = false;
 
 document.addEventListener('touchstart', e => {
