@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no" />
+  <meta name="theme-color" content="#0a0a0f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Dragon Life" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>Dragon Life</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+  <script>
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    window.OneSignalDeferred.push(async function(OneSignal) {
+      await OneSignal.init({
+        appId: "4170c90f-14dd-4985-899f-02f6642a8f0b",
+        serviceWorkerPath: "service-worker.js",
+        serviceWorkerParam: { scope: "/" },
+        allowLocalhostAsSecureOrigin: true,
+        notifyButton: { enable: false },
+      });
+      window.__oneSignalReady = OneSignal;
+      document.dispatchEvent(new CustomEvent('onesignal-ready'));
+    });
+  </script>
+</head>
+<body>
+
+<div id="loadingBar" style="position:fixed;top:0;left:0;height:3px;width:0%;background:linear-gradient(90deg,#3b82f6,#60a5fa);z-index:9999;opacity:0;pointer-events:none;border-radius:0 2px 2px 0"></div>
+<div id="screen"></div>
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+
+<nav class="bottom-nav" role="tablist">
+  <button class="nav-btn active" data-tab="dashboard" aria-label="Dashboard">
+    <span class="nav-ico">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7h-6v7H4a1 1 0 0 1-1-1V11z" stroke-linejoin="round"/></svg>
+    </span>
+    <span class="nav-lbl">Acasă</span>
+  </button>
+  <button class="nav-btn" data-tab="tasks" aria-label="Task-uri">
+    <span class="nav-ico">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 3 3 5-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </span>
+    <span class="nav-lbl">Task-uri</span>
+  </button>
+  <button class="nav-btn nav-fab-btn" data-act="openFabMenu" aria-label="Adaugă">
+    <span class="nav-fab">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
+    </span>
+  </button>
+  <button class="nav-btn" data-tab="habits" aria-label="Obiceiuri">
+    <span class="nav-ico">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
+    </span>
+    <span class="nav-lbl">Obiceiuri</span>
+  </button>
+  <button class="nav-btn" data-tab="profile" aria-label="Profil">
+    <span class="nav-ico">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0" stroke-linecap="round"/></svg>
+    </span>
+    <span class="nav-lbl">Profil</span>
+  </button>
+</nav>
+
+<script src="app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', async () => {
+      try {
+        const reg = await navigator.serviceWorker.register('service-worker.js');
+        reg.update();
+        setInterval(() => reg.update(), 30000);
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing;
+          nw && nw.addEventListener('statechange', () => {
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) nw.postMessage('SKIP_WAITING');
+          });
+        });
+        let reloading = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (reloading) return; reloading = true; location.reload();
+        });
+      } catch(e) { console.warn('SW registration failed', e); }
+    });
+  }
+</script>
+</body>
+</html>
