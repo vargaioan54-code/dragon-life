@@ -186,6 +186,86 @@ function sleepLabel(min) {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
+// ===== NIGHT MODE =====
+function isNightMode() {
+  const sf = state.health.sleepFrom;
+  const st = state.health.sleepTo;
+  if (!sf || !st) return false;
+  const now = new Date();
+  const cur = now.getHours() * 60 + now.getMinutes();
+  const [fh, fm] = sf.split(':').map(Number);
+  const [th, tm] = st.split(':').map(Number);
+  const start = fh * 60 + fm;
+  const end = th * 60 + tm;
+  if (start > end) return cur >= start || cur < end;
+  return cur >= start && cur < end;
+}
+
+function showNightMode() {
+  const existing = document.getElementById('nightModeScreen');
+  if (existing) return;
+  const sf = state.health.sleepFrom;
+  const st = state.health.sleepTo;
+  const overlay = document.createElement('div');
+  overlay.id = 'nightModeScreen';
+  overlay.innerHTML = `
+    <div class="night-clock" id="nightClock"></div>
+    <div class="night-icon">🌙</div>
+    <div class="night-title">Mod Noapte</div>
+    <div class="night-sub">Trezire la ${st || '—'}</div>
+    <button class="night-unlock" id="nightUnlock">Deblocheaza</button>
+  `;
+  document.body.appendChild(overlay);
+  function updateClock() {
+    const n = new Date();
+    const el = document.getElementById('nightClock');
+    if (el) el.textContent = n.getHours().toString().padStart(2,'0') + ':' + n.getMinutes().toString().padStart(2,'0');
+  }
+  updateClock();
+  const timer = setInterval(updateClock, 30000);
+  document.getElementById('nightUnlock').addEventListener('click', () => {
+    clearInterval(timer);
+    overlay.remove();
+  });
+}
+
+function checkNightMode() {
+  if (isNightMode()) showNightMode();
+  else {
+    const el = document.getElementById('nightModeScreen');
+    if (el) el.remove();
+  }
+}
+
+async function scheduleSleepNotifs(sf, st, name) {
+  if (!sf || !st) return;
+  const prev = state.health._sleepNotifIds || {};
+  if (prev.bed) fetch('/api?action=cancel', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id: prev.bed }) }).catch(()=>{});
+  if (prev.wake) fetch('/api?action=cancel', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id: prev.wake }) }).catch(()=>{});
+
+  const extId = state.profile._pushId;
+  if (!extId) return;
+
+  function nextOccurrence(hh, mm) {
+    const now = new Date();
+    const t = new Date(now);
+    t.setHours(hh, mm, 0, 0);
+    if (t <= now) t.setDate(t.getDate() + 1);
+    return t.toISOString();
+  }
+
+  const [bh, bm] = sf.split(':').map(Number);
+  const [wh, wm] = st.split(':').map(Number);
+
+  const [bedRes, wakeRes] = await Promise.all([
+    fetch('/api?action=schedule', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ externalId: extId, title: '🌙 Timp de culcare!', body: `Noapte buna, ${name}! Somn usor 😴`, sendAt: nextOccurrence(bh, bm) }) }).then(r=>r.json()).catch(()=>({})),
+    fetch('/api?action=schedule', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ externalId: extId, title: '☀️ Buna dimineata!', body: `Trezire usoara, ${name}! 🌅 O zi buna!`, sendAt: nextOccurrence(wh, wm) }) }).then(r=>r.json()).catch(()=>({}) )
+  ]);
+
+  state.health._sleepNotifIds = { bed: bedRes.id || null, wake: wakeRes.id || null };
+  save();
+}
+
 // ===== COMPUTED PROGRESS =====
 function computeProgress() {
   const today = todayISO();
@@ -990,16 +1070,22 @@ function openHealthModal() {
   });
 
   modal.querySelector('#mHealthSave').addEventListener('click', () => {
-    const bpm = parseInt(modal.querySelector('#mBpm').value) || 72;
-    const energy = parseInt(modal.querySelector('#mEnergy').value) || 70;
-    const sleepFrom = modal.querySelector('#mSleepFrom').value || '23:00';
-    const sleepTo = modal.querySelector('#mSleepTo').value || '06:30';
+    const bpm = parseInt(modal.querySelector('#mBpm').value) || 0;
+    const energy = parseInt(modal.querySelector('#mEnergy').value) || 0;
+    const sleepFrom = modal.querySelector('#mSleepFrom').value;
+    const sleepTo = modal.querySelector('#mSleepTo').value;
     const water = parseInt(modal.querySelector('#mWater').value) || 0;
+    const prevSf = state.health.sleepFrom;
+    const prevSt = state.health.sleepTo;
     state.health = { ...state.health, bpm, energy, sleepFrom, sleepTo, water, meals: { ...mealMap } };
     save();
     close();
     render();
     toast('Date sanatate salvate! 💪');
+    if (sleepFrom && sleepTo && (sleepFrom !== prevSf || sleepTo !== prevSt)) {
+      scheduleSleepNotifs(sleepFrom, sleepTo, state.profile.name).catch(() => {});
+    }
+    checkNightMode();
   });
 }
 function openStatsModal() {
@@ -1558,4 +1644,6 @@ document.addEventListener('DOMContentLoaded', () => {
   ensureHabitsDay();
   updateStreak();
   setTab(state.currentTab || 'dashboard');
+  checkNightMode();
+  setInterval(checkNightMode, 60000);
 });
