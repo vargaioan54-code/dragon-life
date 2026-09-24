@@ -266,27 +266,138 @@ async function scheduleSleepNotifs(sf, st, name) {
   save();
 }
 
-// ===== COMPUTED PROGRESS =====
-function computeProgress() {
+// ===== DRAGON SCORE ENGINE =====
+function computeDragonScore() {
   const today = todayISO();
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+
+  // ── TASKS (weight 35%) ──────────────────────────────────────────
   const todayTasks = state.tasks.filter(t => t.date === today);
   const doneTasks = todayTasks.filter(t => t.done).length;
-  const totalTasks = todayTasks.length || 1;
-  const tasksPct = Math.round((doneTasks / totalTasks) * 100);
+  const totalTasks = todayTasks.length;
+  let tasksScore = 0;
+  if (totalTasks === 0) {
+    tasksScore = 0;
+  } else {
+    const basePct = (doneTasks / totalTasks) * 100;
+    const allDoneBonus = doneTasks === totalTasks ? 15 : 0;
+    const workBonus = Math.min(15, todayTasks.filter(t => t.done && t.chip === 'work').length * 5);
+    const overduePenalty = todayTasks.filter(t => {
+      if (t.done) return false;
+      const [th, tm] = (t.time || '23:59').split(':').map(Number);
+      return (th * 60 + tm) < nowMin;
+    }).length * 5;
+    tasksScore = Math.min(100, Math.max(0, basePct + allDoneBonus + workBonus - overduePenalty));
+  }
 
+  // ── HABITS (weight 30%) ─────────────────────────────────────────
   const doneHabits = state.habits.filter(h => h.done).length;
-  const totalHabits = state.habits.length || 1;
-  const habitsPct = Math.round((doneHabits / totalHabits) * 100);
+  const totalHabits = state.habits.length;
+  let habitsScore = 0;
+  if (totalHabits > 0) {
+    const baseH = (doneHabits / totalHabits) * 100;
+    const allHabitsBonus = doneHabits === totalHabits ? 20 : 0;
+    const avgStreak = state.habits.length > 0
+      ? state.habits.reduce((s, h) => s + (h.streak || 0), 0) / state.habits.length
+      : 0;
+    const streakBonus = Math.min(20, (avgStreak / 7) * 20);
+    habitsScore = Math.min(100, baseH + allHabitsBonus + streakBonus);
+  }
 
-  const productivityPct = Math.round((tasksPct * 0.7) + (habitsPct * 0.3));
-  const healthPct = Math.round(
-    (state.health.energy || 0) * 0.4 +
-    Math.min(100, ((state.health.water || 0) / (state.health.waterGoal || 2500)) * 100) * 0.3 +
-    Math.min(100, (sleepMinutes(state.health.sleepFrom, state.health.sleepTo) / 480) * 100) * 0.3
+  // ── HEALTH (weight 20%) ─────────────────────────────────────────
+  const sleepMin = sleepMinutes(state.health.sleepFrom, state.health.sleepTo);
+  const sleepHas = !!(state.health.sleepFrom && state.health.sleepTo);
+  let sleepScore = sleepHas
+    ? (sleepMin < 300 ? 20 : sleepMin < 360 ? 40 : sleepMin < 420 ? 70 : sleepMin <= 540 ? 100 : 75)
+    : 0;
+  const energyScore = state.health.energy || 0;
+  const waterScore = state.health.waterGoal > 0
+    ? Math.min(100, ((state.health.water || 0) / state.health.waterGoal) * 100)
+    : 0;
+  const mealsCount = Object.values(state.health.meals || {}).filter(Boolean).length;
+  const mealScore = (mealsCount / 4) * 100;
+  const bpm = state.health.bpm || 0;
+  const bpmScore = bpm === 0 ? 0
+    : bpm >= 55 && bpm <= 75 ? 100
+    : bpm >= 75 && bpm <= 85 ? 85
+    : bpm >= 45 && bpm <= 55 ? 70
+    : 50;
+  const healthInputs = sleepHas ? [sleepScore, energyScore, waterScore, mealScore, bpmScore]
+    : [energyScore, waterScore, mealScore];
+  const healthScore = healthInputs.length > 0
+    ? healthInputs.reduce((a, b) => a + b, 0) / healthInputs.length
+    : 0;
+
+  // ── MOMENTUM (weight 15%) ───────────────────────────────────────
+  const streak = state.stats.streak || 0;
+  const streakScore = Math.min(100, streak * 8);
+  const usageDays = (state.usage.dates || []);
+  const last7 = usageDays.filter(d => {
+    const diff = (Date.now() - new Date(d).getTime()) / 86400000;
+    return diff <= 7;
+  }).length;
+  const consistencyScore = Math.min(100, (last7 / 7) * 100);
+  const pts = state.stats.pointsHistory || [];
+  let trendScore = 50;
+  if (pts.length >= 3) {
+    const recent = pts.slice(-3).map(p => p.pts);
+    if (recent[2] > recent[1] && recent[1] > recent[0]) trendScore = 100;
+    else if (recent[2] > recent[0]) trendScore = 75;
+    else if (recent[2] < recent[0]) trendScore = 25;
+  }
+  const momentumScore = (streakScore * 0.5 + consistencyScore * 0.3 + trendScore * 0.2);
+
+  // ── COMPOSITE ──────────────────────────────────────────────────
+  const weights = totalTasks > 0
+    ? { t: 0.35, h: 0.30, he: 0.20, m: 0.15 }
+    : { t: 0, h: 0.45, he: 0.30, m: 0.25 };
+  const total = Math.round(
+    tasksScore * weights.t +
+    habitsScore * weights.h +
+    healthScore * weights.he +
+    momentumScore * weights.m
   );
-  const overallPct = Math.round((tasksPct + productivityPct + healthPct) / 3);
 
-  return { tasksPct, productivityPct, healthPct, overallPct, doneTasks, totalTasks };
+  // ── GRADE & INSIGHTS ───────────────────────────────────────────
+  const grade = total >= 91 ? { label: 'Dragon Mode', emoji: '🐉', color: '#a855f7' }
+    : total >= 81 ? { label: 'Excelent', emoji: '🏆', color: '#eab308' }
+    : total >= 61 ? { label: 'Productiv', emoji: '🔥', color: '#f97316' }
+    : total >= 41 ? { label: 'Activ', emoji: '⚡', color: '#3b82f6' }
+    : total >= 21 ? { label: 'In formare', emoji: '🌱', color: '#22c55e' }
+    : { label: 'Inceput', emoji: '😴', color: '#6060a0' };
+
+  const insights = [];
+  if (totalTasks > 0 && doneTasks < totalTasks) insights.push(`${totalTasks - doneTasks} task${totalTasks - doneTasks > 1 ? '-uri' : ''} neTerminate`);
+  if (totalHabits > 0 && doneHabits < totalHabits) insights.push(`${totalHabits - doneHabits} obicei${totalHabits - doneHabits > 1 ? 'uri' : ''} bifabile`);
+  if (sleepHas && sleepMin < 420) insights.push('Somn sub 7h — prioritizeaza odihna');
+  if (state.health.water > 0 && waterScore < 60) insights.push('Hidratare scazuta — mai bea apa');
+  if (streak >= 7) insights.push(`Serie de ${streak} zile — continua!`);
+  if (total >= 90) insights.push('Zi perfecta! Felicitari!');
+
+  return {
+    total,
+    grade,
+    insights,
+    components: {
+      tasks: { score: Math.round(tasksScore), done: doneTasks, total: totalTasks, label: 'Task-uri' },
+      habits: { score: Math.round(habitsScore), done: doneHabits, total: totalHabits, label: 'Obiceiuri' },
+      health: { score: Math.round(healthScore), label: 'Sanatate', details: { sleep: Math.round(sleepScore), energy: energyScore, water: Math.round(waterScore), meals: Math.round(mealScore) } },
+      momentum: { score: Math.round(momentumScore), label: 'Momentum', streak }
+    }
+  };
+}
+
+function computeProgress() {
+  const ds = computeDragonScore();
+  return {
+    overallPct: ds.total,
+    doneTasks: ds.components.tasks.done,
+    totalTasks: ds.components.tasks.total || 1,
+    tasksPct: ds.components.tasks.score,
+    productivityPct: ds.components.habits.score,
+    healthPct: ds.components.health.score
+  };
 }
 
 // ===== POINTS =====
@@ -467,7 +578,7 @@ function render() {
 
 // ===== DASHBOARD SCREEN =====
 function renderDashboard() {
-  const prog = computeProgress();
+  const ds = computeDragonScore();
   const today = todayISO();
   const sleepMin = sleepMinutes(state.health.sleepFrom, state.health.sleepTo);
   const unread = state.notifications.filter(n => !n.read).length;
@@ -475,6 +586,8 @@ function renderDashboard() {
   const avatarContent = photo
     ? `<img src="${photo}" alt="avatar"/>`
     : `<span>😊</span>`;
+  const c = ds.components;
+  const barColor = ds.total >= 81 ? '#a855f7' : ds.total >= 61 ? '#f97316' : ds.total >= 41 ? '#3b82f6' : '#22c55e';
 
   return `<div class="dashboard-page">
     <div class="dash-header">
@@ -493,55 +606,44 @@ function renderDashboard() {
       </div>
     </div>
 
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-card-top"><span class="stat-label">Finalizate</span><span class="stat-icon">✅</span></div>
-        <div class="stat-value green">${prog.doneTasks}</div>
-        <div class="stat-sub">din ${prog.totalTasks} task-uri azi</div>
-        <div class="stat-spark">${sparkline(getDailyData('tasks'), 80, 28, '#22c55e')}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-top"><span class="stat-label">Serie activa</span><span class="stat-icon">🔥</span></div>
-        <div class="stat-value orange">${state.stats.streak}</div>
-        <div class="stat-sub">zile consecutive</div>
-        <div class="stat-spark">${sparkline(getDailyData('streak'), 80, 28, '#f97316')}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-top"><span class="stat-label">Puncte</span><span class="stat-icon">🏆</span></div>
-        <div class="stat-value violet">${state.stats.points}</div>
-        <div class="stat-sub">puncte acumulate</div>
-        <div class="stat-spark">${sparkline(getDailyData('points'), 80, 28, '#a855f7')}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-card-top"><span class="stat-label">Somn mediu</span><span class="stat-icon">🌙</span></div>
-        <div class="stat-value blue">${sleepLabel(sleepMin)}</div>
-        <div class="stat-sub">azi noapte</div>
-        <div class="stat-spark">${sparkline(getDailyData('sleep'), 80, 28, '#3b82f6')}</div>
-      </div>
-    </div>
-
-    <div class="progress-card">
-      <div class="progress-card-header">
-        <span class="progress-card-title">Progres azi</span>
-        <span class="progress-pct">${prog.overallPct}%</span>
-      </div>
-      <div class="progress-bar-track">
-        <div class="progress-bar-fill" style="width:${prog.overallPct}%"></div>
-      </div>
-      <div class="progress-metrics">
-        <div class="progress-metric">
-          <div class="progress-metric-val">${prog.doneTasks}/${prog.totalTasks}</div>
-          <div class="progress-metric-lbl">Task-uri</div>
-        </div>
-        <div class="progress-metric">
-          <div class="progress-metric-val">${prog.productivityPct}%</div>
-          <div class="progress-metric-lbl">Productivitate</div>
-        </div>
-        <div class="progress-metric">
-          <div class="progress-metric-val">${prog.healthPct}%</div>
-          <div class="progress-metric-lbl">Sanatate</div>
+    <div class="dragon-score-card" data-act="openScoreModal">
+      <div class="ds-left">
+        <div class="ds-grade-emoji">${ds.grade.emoji}</div>
+        <div>
+          <div class="ds-grade-label" style="color:${ds.grade.color}">${ds.grade.label}</div>
+          <div class="ds-grade-sub">Scor Dragon</div>
         </div>
       </div>
+      <div class="ds-right">
+        <div class="ds-score" style="color:${ds.grade.color}">${ds.total}</div>
+        <div class="ds-score-max">/100</div>
+      </div>
+      <div class="ds-bar-track" style="margin-top:14px">
+        <div class="ds-bar-fill" style="width:${ds.total}%;background:${ds.grade.color}"></div>
+      </div>
+      <div class="ds-components">
+        <div class="ds-comp">
+          <div class="ds-comp-val">${c.tasks.done}/${c.tasks.total || '—'}</div>
+          <div class="ds-comp-lbl">Tasks</div>
+          <div class="ds-comp-bar"><div style="width:${c.tasks.score}%;background:#22c55e"></div></div>
+        </div>
+        <div class="ds-comp">
+          <div class="ds-comp-val">${c.habits.done}/${c.habits.total || '—'}</div>
+          <div class="ds-comp-lbl">Habits</div>
+          <div class="ds-comp-bar"><div style="width:${c.habits.score}%;background:#a855f7"></div></div>
+        </div>
+        <div class="ds-comp">
+          <div class="ds-comp-val">${c.health.score}%</div>
+          <div class="ds-comp-lbl">Health</div>
+          <div class="ds-comp-bar"><div style="width:${c.health.score}%;background:#ef4444"></div></div>
+        </div>
+        <div class="ds-comp">
+          <div class="ds-comp-val">${c.momentum.streak}🔥</div>
+          <div class="ds-comp-lbl">Streak</div>
+          <div class="ds-comp-bar"><div style="width:${c.momentum.score}%;background:#f97316"></div></div>
+        </div>
+      </div>
+      ${ds.insights.length > 0 ? `<div class="ds-insight">💡 ${ds.insights[0]}</div>` : ''}
     </div>
 
     <div class="health-dash-card" style="margin:0 16px 12px" data-act="openHealthModal">
@@ -1088,6 +1190,53 @@ function openHealthModal() {
     checkNightMode();
   });
 }
+function openScoreModal() {
+  const ds = computeDragonScore();
+  const c = ds.components;
+  function bar(score, color) {
+    return `<div class="score-bar-track"><div class="score-bar-fill" style="width:${score}%;background:${color}"></div></div>`;
+  }
+  openModal(`
+    <div class="modal-header">
+      <span class="modal-title">Dragon Score</span>
+      <button class="modal-close" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="text-align:center;padding:12px 0 20px">
+        <div style="font-size:56px;line-height:1">${ds.grade.emoji}</div>
+        <div style="font-size:52px;font-weight:900;color:${ds.grade.color};line-height:1.1">${ds.total}</div>
+        <div style="font-size:18px;font-weight:700;color:${ds.grade.color};margin-top:4px">${ds.grade.label}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px;font-weight:600;color:var(--text)">✅ Task-uri</span><span style="font-size:13px;font-weight:700;color:#22c55e">${c.tasks.score}%</span></div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">${c.tasks.done} din ${c.tasks.total} finalizate azi · bonus muncă + penalizare restante</div>
+          ${bar(c.tasks.score, '#22c55e')}
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px;font-weight:600;color:var(--text)">🔄 Obiceiuri</span><span style="font-size:13px;font-weight:700;color:#a855f7">${c.habits.score}%</span></div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">${c.habits.done} din ${c.habits.total} bifate · bonus serie + toate complete</div>
+          ${bar(c.habits.score, '#a855f7')}
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px;font-weight:600;color:var(--text)">❤️ Sanatate</span><span style="font-size:13px;font-weight:700;color:#ef4444">${c.health.score}%</span></div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Somn ${c.health.details.sleep}% · Energie ${c.health.details.energy}% · Apa ${c.health.details.water}% · Mese ${c.health.details.meals}%</div>
+          ${bar(c.health.score, '#ef4444')}
+        </div>
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px;font-weight:600;color:var(--text)">🔥 Momentum</span><span style="font-size:13px;font-weight:700;color:#f97316">${c.momentum.score}%</span></div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Serie ${c.momentum.streak} zile · consistenta + trend puncte</div>
+          ${bar(c.momentum.score, '#f97316')}
+        </div>
+      </div>
+      ${ds.insights.length > 0 ? `<div style="margin-top:16px;padding:12px;background:var(--bg3);border-radius:var(--radius-sm);border:1px solid var(--border)">
+        <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px">💡 Observatii</div>
+        ${ds.insights.map(i => `<div style="font-size:12px;color:var(--text);margin-bottom:4px">• ${i}</div>`).join('')}
+      </div>` : ''}
+    </div>
+  `);
+}
+
 function openStatsModal() {
   const prog = computeProgress();
   const days = ['Lu', 'Ma', 'Mi', 'Jo', 'Vi', 'Sa', 'Du'];
@@ -1567,6 +1716,7 @@ document.addEventListener('click', e => {
     case 'openEditHabitModal': openEditHabitModal(id); break;
     case 'openHealthModal': openHealthModal(); break;
     case 'openStatsModal': openStatsModal(); break;
+    case 'openScoreModal': openScoreModal(); break;
     case 'openCalendarModal': openCalendarModal(); break;
     case 'openNotesModal': openNotesModal(); break;
     case 'openPlanDayModal': openPlanDayModal(); break;
