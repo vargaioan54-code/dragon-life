@@ -492,18 +492,6 @@ VIEWS.dashboard = function() {
     </div>
   ` : ''}
 
-  <div class="balance-hero mt-14">
-    <div class="ring" style="width:88px;height:88px">
-      ${ringSVG(bal / 100, 88, 9)}
-      <div class="ring-center"><div class="v">${bal}</div></div>
-    </div>
-    <div class="balance-txt">
-      <div class="l" style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px">Scor de echilibru</div>
-      <div class="t">${balMsg.label}</div>
-      <div class="s">${balMsg.hint}</div>
-    </div>
-  </div>
-
   <div class="grid-2 mt-14">
     <div class="metric card tap" data-view="sleep">
       <div class="row"><div class="m-icon blue">${ICONS.moon}</div><div class="chip ${sq.tone}">${sq.label}</div></div>
