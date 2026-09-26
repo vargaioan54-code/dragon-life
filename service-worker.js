@@ -1,7 +1,7 @@
 // OneSignal handles push events + notifications
 importScripts("https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js");
 
-const VERSION = 'dl-v25-sleep-alarms-quotes';
+const VERSION = 'dl-v26-7days-detailed';
 const CACHE = 'dragonlife-' + VERSION;
 const ASSETS = [
   './',

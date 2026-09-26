@@ -564,6 +564,48 @@ VIEWS.dashboard = function() {
     <div class="spread"><div class="subtitle">Scor de echilibru</div><div class="chip green">${bal}</div></div>
     ${sparklineSVG(series('balance', 7))}
   </div>
+  ${lastNDays(7).map((iso, i) => {
+    const en = state.entries[iso];
+    if (!en) return '';
+    const d = parseISO(iso);
+    const wName = ['Duminică','Luni','Marți','Miercuri','Joi','Vineri','Sâmbătă'][d.getDay()];
+    const isToday = iso === todayISO();
+    const sleep = en.sleep && en.sleep.total_min ? fmtDur(en.sleep.total_min) : '—';
+    const en_energy = en.mood ? en.mood.energy : null;
+    const en_stress = en.mood ? en.mood.stress : null;
+    const en_rating = en.mood ? en.mood.rating : null;
+    const en_steps = en.activity ? en.activity.steps.toLocaleString('ro-RO') : '—';
+    const en_water = en.nutrition && en.nutrition.water_ml ? (en.nutrition.water_ml/1000).toFixed(1) + 'L' : '—';
+    const routineTot = state.routine_items.length;
+    const routineOk  = routineTot && en.routine ? en.routine.completed.filter(id => state.routine_items.some(it => it.id === id)).length : 0;
+    const habitsTot = state.habits.filter(h => !h.archived).length;
+    const habitsOk  = habitsTot ? en.habits_done.length : 0;
+    const bScore    = scoreBalance(iso);
+    const hasAny    = en.sleep || en.mood || en.activity || en.nutrition || (en.routine && en.routine.completed.length) || en.habits_done.length;
+    if (!hasAny) return '';
+    return `<div class="card" style="padding:12px 14px${isToday ? ';border-color:var(--green)' : ''}">
+      <div class="spread" style="margin-bottom:10px">
+        <div>
+          <div style="font-weight:700;font-size:15px">Ziua ${i+1} <span class="subtitle" style="font-weight:400;margin-left:6px">${wName} · ${d.getDate()}</span></div>
+          ${isToday ? '<div class="chip green" style="margin-top:4px">Astăzi</div>' : ''}
+        </div>
+        <div class="ring" style="width:44px;height:44px">
+          ${ringSVG(bScore/100, 44, 5)}
+          <div class="ring-center"><div style="font-size:13px;font-weight:700;color:var(--green)">${bScore}</div></div>
+        </div>
+      </div>
+      <div class="grid-3" style="gap:6px">
+        <div class="chip blue">${ICONS.moon}<span style="margin-left:4px">${sleep}</span></div>
+        ${en_energy !== null ? `<div class="chip amber">${ICONS.bolt}<span style="margin-left:4px">${en_energy}%</span></div>` : `<div class="chip">${ICONS.bolt}<span style="margin-left:4px">—</span></div>`}
+        ${en_rating !== null ? `<div class="chip ${moodColor(en_rating)}"><span>${moodEmoji(en_rating)}</span><span style="margin-left:4px">${moodLabel(en_rating)}</span></div>` : `<div class="chip">😐<span style="margin-left:4px">—</span></div>`}
+        <div class="chip purple">${ICONS.activity}<span style="margin-left:4px">${en_steps}</span></div>
+        <div class="chip cyan">${ICONS.water}<span style="margin-left:4px">${en_water}</span></div>
+        ${en_stress !== null ? `<div class="chip red">${ICONS.heart}<span style="margin-left:4px">${en_stress}%</span></div>` : `<div class="chip">${ICONS.heart}<span style="margin-left:4px">—</span></div>`}
+      </div>
+      ${routineTot > 0 ? `<div class="mt-10"><div class="spread"><span class="subtitle">Rutină</span><span class="subtitle">${routineOk}/${routineTot}</span></div><div class="pbar amber" style="margin-top:4px"><i style="width:${routineTot ? (routineOk/routineTot*100).toFixed(0) : 0}%"></i></div></div>` : ''}
+      ${habitsTot > 0 ? `<div class="mt-6"><div class="spread"><span class="subtitle">Obiceiuri</span><span class="subtitle">${habitsOk}/${habitsTot}</span></div><div class="pbar" style="margin-top:4px"><i style="width:${habitsTot ? (habitsOk/habitsTot*100).toFixed(0) : 0}%"></i></div></div>` : ''}
+    </div>`;
+  }).reverse().join('')}
   ` : ''}
   `;
 };
