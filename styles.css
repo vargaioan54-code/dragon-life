@@ -304,6 +304,19 @@ a { color: var(--blue); text-decoration: none; }
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
+.more-tasks-link {
+  margin-top: 8px;
+  width: 100%;
+  padding: 6px;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.more-tasks-link:hover { background: rgba(59,130,246,0.08); }
+
 .btn-add-task {
   margin-top: 14px;
   width: 100%;

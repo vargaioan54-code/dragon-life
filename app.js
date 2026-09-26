@@ -621,7 +621,9 @@ function renderDashboard() {
   const prod = productivityPct();
   const hp = healthPct();
   const tToday = tasksToday();
-  const showTasks = tToday.slice(0, 5);
+  const maxShow = 8;
+  const showTasks = tToday.slice(0, maxShow);
+  const moreTasks = Math.max(0, tToday.length - maxShow);
   const showHabits = state.habits.slice(0, 7);
   const bellClass = state.push.enabled ? 'hdr-bell -on' : 'hdr-bell';
 
@@ -693,6 +695,7 @@ function renderDashboard() {
                 <span class="ttime">${esc(t.time || '')}</span>
               </div>
             `).join('') || '<div class="empty" style="padding:12px 0">Niciun task azi.</div>'}
+            ${moreTasks ? `<button class="more-tasks-link" data-act="goTasks">+${moreTasks} în tab</button>` : ''}
           </div>
           <button class="btn-add-task" data-act="openAddTask">${IC.plus} Task nou</button>
         </div>
