@@ -1,7 +1,7 @@
 // OneSignal handles push events + notifications
 importScripts("https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js");
 
-const VERSION = 'dl-v32-smoke-real';
+const VERSION = 'dl-v33-shake-detect';
 const CACHE = 'dragonlife-' + VERSION;
 const ASSETS = [
   './',

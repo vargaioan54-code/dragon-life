@@ -75,6 +75,7 @@ const DEFAULT_STATE = {
     notifications: true,
     bedtime: '22:00',          // alarmă culcare — auto-logează sleep.bedtime pe ziua următoare
     wakeup:  '08:00',          // alarmă trezire — auto-logează sleep.wakeup pe ziua curentă
+    smoke_shake: false,        // detectare 3× agitare pentru +1 țigară
   },
   routine_items: [],
   habits: [],
@@ -592,11 +593,12 @@ VIEWS.routine         = routineViewForSlot('morning');
 VIEWS.routine_noon    = routineViewForSlot('noon');
 VIEWS.routine_evening = routineViewForSlot('evening');
 
-// —— Fumat (simplu) ——
+// —— Fumat (simplu + shake) ——
 VIEWS.smoking = function() {
   const e = todayEntry();
   const count = (e.smoking && e.smoking.entries) ? e.smoking.entries.length : 0;
   const startedApp = isStarted();
+  const shakeOn = state.prefs.smoke_shake;
   return `
   <div class="row" style="gap:10px">
     <button class="icon-btn" data-action="back">${ICONS.back}</button>
@@ -609,6 +611,19 @@ VIEWS.smoking = function() {
     <div class="subtitle mt-6">azi</div>
     <button class="btn primary block mt-14" data-action="smoke-log" ${!startedApp ? 'disabled' : ''}>${ICONS.plus}<span>+1</span></button>
     ${count ? `<button class="btn ghost block" data-action="smoke-undo" style="margin-top:6px">Anulează</button>` : ''}
+  </div>
+
+  <div class="card" style="padding:14px">
+    <div class="spread">
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:14px">Agită 3× pentru +1</div>
+        <div class="subtitle mt-6">Agită telefonul de 3 ori rapid — se înregistrează automat.</div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="shakeToggle" ${shakeOn ? 'checked' : ''}/>
+      </label>
+    </div>
+    ${shakeOn ? '<div class="chip green mt-10">Activ — agită telefonul</div>' : ''}
   </div>
   `;
 };
@@ -1339,6 +1354,18 @@ function wireViewActions() {
   const eSlider = $('#energySlider'); if (eSlider) eSlider.oninput = e => { $('#energyVal').textContent = e.target.value + '%'; e.target.style.setProperty('--v', e.target.value + '%'); };
   const sSlider = $('#stressSlider'); if (sSlider) sSlider.oninput = e => { $('#stressVal').textContent = e.target.value + '%'; e.target.style.setProperty('--v', e.target.value + '%'); };
   const jSearch = $('#jSearch'); if (jSearch) jSearch.oninput = e => { viewState.q = e.target.value; renderSoft(); };
+  const shakeToggle = $('#shakeToggle'); if (shakeToggle) shakeToggle.onchange = async () => {
+    if (shakeToggle.checked) {
+      const ok = await requestShakePermission();
+      if (!ok) { shakeToggle.checked = false; toast('Permisiune de mișcare refuzată'); return; }
+      state.prefs.smoke_shake = true; save(); startShakeDetection();
+      toast('Detecție activă — agită 3×');
+    } else {
+      state.prefs.smoke_shake = false; save(); stopShakeDetection();
+      toast('Detecție oprită');
+    }
+    render();
+  };
 }
 function renderSoft() { // avoid resetting scroll for the search
   const sy = window.scrollY;
@@ -2159,6 +2186,50 @@ function localReminderTick() {
   }
 }
 
+// —— Shake detection (3× agitare = +1 țigară) ——
+const shakeState = { last: null, times: [], enabled: false, cooldown: 0 };
+async function requestShakePermission() {
+  if (typeof DeviceMotionEvent === 'undefined') { toast('Dispozitiv fără senzor de mișcare'); return false; }
+  if (typeof DeviceMotionEvent.requestPermission === 'function') {
+    try { const p = await DeviceMotionEvent.requestPermission(); return p === 'granted'; }
+    catch (e) { return false; }
+  }
+  return true; // Android — no permission prompt
+}
+function onShakeMotion(ev) {
+  if (!isStarted() || !state.prefs.smoke_shake) return;
+  const now = Date.now();
+  if (now - shakeState.cooldown < 5000) return;
+  const a = ev.accelerationIncludingGravity || ev.acceleration;
+  if (!a || a.x == null) return;
+  if (!shakeState.last) { shakeState.last = { x: a.x, y: a.y, z: a.z, t: now }; return; }
+  const dt = Math.max(1, now - shakeState.last.t) / 1000;
+  const dx = a.x - shakeState.last.x, dy = a.y - shakeState.last.y, dz = a.z - shakeState.last.z;
+  const mag = Math.sqrt(dx*dx + dy*dy + dz*dz) / dt;
+  shakeState.last = { x: a.x, y: a.y, z: a.z, t: now };
+  if (mag > 25) {
+    shakeState.times.push(now);
+    shakeState.times = shakeState.times.filter(t => now - t < 2000);
+    if (shakeState.times.length >= 3) {
+      shakeState.times = [];
+      shakeState.cooldown = now;
+      if (navigator.vibrate) navigator.vibrate([80, 40, 80, 40, 120]);
+      ACTIONS['smoke-log']();
+      toast('🚬 țigară din agitare');
+    }
+  }
+}
+function startShakeDetection() {
+  if (shakeState.enabled) return;
+  window.addEventListener('devicemotion', onShakeMotion);
+  shakeState.enabled = true;
+}
+function stopShakeDetection() {
+  window.removeEventListener('devicemotion', onShakeMotion);
+  shakeState.enabled = false;
+  shakeState.last = null; shakeState.times = [];
+}
+
 // public helpers for inline onclick
 window.DL = {
   close: closeModal,
@@ -2171,6 +2242,12 @@ document.addEventListener('DOMContentLoaded', () => {
   updateStreak();
   initShellWiring();
   setInterval(localReminderTick, 60 * 1000);
+  if (state.prefs.smoke_shake) {
+    // Attempt to reactivate; permission may still be granted from previous session
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission !== 'function') {
+      startShakeDetection();
+    }
+  }
 });
 
 })();
