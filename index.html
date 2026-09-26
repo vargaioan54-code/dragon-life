@@ -3,57 +3,130 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no" />
-  <meta name="theme-color" content="#0a0e1a" />
+  <meta name="theme-color" content="#0b1220" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Dragon Life" />
   <meta name="format-detection" content="telephone=no" />
-  <title>Dragon Life</title>
+  <title>Dragon Life · sănătate & echilibru</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="assets/avatar.jpg" />
   <link rel="stylesheet" href="styles.css" />
-  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
-  <script>
-    window.OneSignalDeferred = window.OneSignalDeferred || [];
-    window.OneSignalDeferred.push(async function (OneSignal) {
-      try {
-        await OneSignal.init({
-          appId: "4170c90f-14dd-4985-899f-02f6642a8f0b",
-          serviceWorkerPath: "service-worker.js",
-          serviceWorkerParam: { scope: "/" },
-          allowLocalhostAsSecureOrigin: true,
-          notifyButton: { enable: false }
-        });
-      } catch (e) { /* offline / blocked */ }
-    });
-  </script>
 </head>
 <body>
-  <div id="screen"></div>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Meniu principal">
+      <div class="sidebar-scrim" id="sidebarScrim"></div>
+      <div class="sidebar-panel">
+        <div class="side-user">
+          <img class="side-avatar" src="assets/avatar.jpg" alt="" id="sideAvatar" />
+          <div class="side-user-txt">
+            <div class="side-user-name" id="sideUserName">Ioan Varga</div>
+            <div class="side-user-mail" id="sideUserMail">ioan.varga@email.com</div>
+          </div>
+          <span class="pro-pill">Pro</span>
+        </div>
+        <nav class="side-nav" id="sideNav" aria-label="Secțiuni">
+          <a class="side-item" data-view="dashboard" href="#dashboard">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h14V9"/></svg>
+            <span>Dashboard</span>
+          </a>
+          <a class="side-item" data-view="routine" href="#routine">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg>
+            <span>Rutina de dimineață</span>
+          </a>
+          <a class="side-item" data-view="sleep" href="#sleep">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+            <span>Somn</span>
+          </a>
+          <a class="side-item" data-view="mood" href="#mood">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="15" cy="10" r="1" fill="currentColor"/></svg>
+            <span>Stare zilnică</span>
+          </a>
+          <a class="side-item" data-view="nutrition" href="#nutrition">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16M4 4c4 0 6 3 6 6s-2 4-6 4"/><path d="M15 3v18M18 3v5a3 3 0 0 1-3 3"/></svg>
+            <span>Nutriție</span>
+          </a>
+          <a class="side-item" data-view="activity" href="#activity">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3 4 14h7l-1 7 9-11h-7z"/></svg>
+            <span>Activitate fizică</span>
+          </a>
+          <a class="side-item" data-view="journal" href="#journal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h13a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/><path d="M4 4v13a3 3 0 0 0 3 3"/></svg>
+            <span>Jurnal</span>
+          </a>
+          <a class="side-item" data-view="habits" href="#habits">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>
+            <span>Obiceiuri</span>
+          </a>
+          <a class="side-item" data-view="progress" href="#progress">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20V10M9 20V4M15 20v-8M21 20V6"/></svg>
+            <span>Progres</span>
+          </a>
+          <a class="side-item" data-view="relax" href="#relax">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c2 4 6 5 6 9a6 6 0 1 1-12 0c0-4 4-5 6-9z"/></svg>
+            <span>Relaxare</span>
+          </a>
+          <a class="side-item" data-view="stats" href="#stats">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V4M4 20h16"/><path d="M8 16v-6M12 16V8M16 16v-4"/></svg>
+            <span>Statistici</span>
+          </a>
+          <a class="side-item" data-view="settings" href="#settings">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+            <span>Setări</span>
+          </a>
+        </nav>
+        <button class="side-logout" id="btnLogout">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+          <span>Deconectare</span>
+        </button>
+      </div>
+    </aside>
 
-  <nav class="bottomnav" id="bottomNav">
-    <button class="nav-btn is-active" data-tab="dashboard" aria-label="Dashboard">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h14V9"/></svg>
-      <span>Dashboard</span>
-    </button>
-    <button class="nav-btn" data-tab="tasks" aria-label="Task-uri">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 7 2 2 4-4"/><path d="M11 7h10"/><path d="m3 15 2 2 4-4"/><path d="M11 15h10"/></svg>
-      <span>Task-uri</span>
-    </button>
-    <button class="nav-btn" data-tab="habits" aria-label="Obiceiuri">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>
-      <span>Obiceiuri</span>
-    </button>
-    <button class="nav-btn" data-tab="profile" aria-label="Profil">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
-      <span>Profil</span>
-    </button>
-  </nav>
+    <main class="phone" id="phone">
+      <header class="topbar">
+        <button class="icon-btn" id="btnMenu" aria-label="Meniu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+        <div class="topbar-title" id="topTitle">Dashboard</div>
+        <button class="icon-btn" id="btnBell" aria-label="Notificări">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
+          <span class="bell-dot" id="bellDot" hidden></span>
+        </button>
+      </header>
+
+      <div id="screen" class="screen"></div>
+
+      <nav class="bottomnav" id="bottomNav">
+        <button class="nav-btn" data-view="dashboard" aria-label="Acasă">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h14V9"/></svg>
+          <span>Acasă</span>
+        </button>
+        <button class="nav-btn" data-view="routine" aria-label="Rutina">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg>
+          <span>Rutina</span>
+        </button>
+        <button class="nav-btn" data-view="journal" aria-label="Jurnal">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h13a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/></svg>
+          <span>Jurnal</span>
+        </button>
+        <button class="nav-btn" data-view="progress" aria-label="Progres">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20V10M9 20V4M15 20v-8M21 20V6"/></svg>
+          <span>Progres</span>
+        </button>
+        <button class="nav-btn" data-view="more" aria-label="Mai mult">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+          <span>Mai mult</span>
+        </button>
+      </nav>
+    </main>
+  </div>
 
   <div id="modalRoot"></div>
   <div id="toastRoot"></div>
+  <div id="notifRoot" class="notif-tray" hidden></div>
 
   <script src="app.js"></script>
   <script>
@@ -62,16 +135,6 @@
         try {
           const reg = await navigator.serviceWorker.register('service-worker.js');
           reg.update();
-          reg.addEventListener('updatefound', () => {
-            const nw = reg.installing;
-            nw && nw.addEventListener('statechange', () => {
-              if (nw.state === 'installed' && navigator.serviceWorker.controller) nw.postMessage('SKIP_WAITING');
-            });
-          });
-          let reloading = false;
-          navigator.serviceWorker.addEventListener('controllerchange', () => {
-            if (reloading) return; reloading = true; location.reload();
-          });
         } catch (e) { /* ignore */ }
       });
     }
