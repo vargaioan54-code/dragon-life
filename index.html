@@ -12,7 +12,7 @@
   <title>Dragon Life · sănătate & echilibru</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="assets/avatar.jpg" />
+  <link rel="apple-touch-icon" href="icon.svg" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -20,22 +20,19 @@
     <aside class="sidebar" id="sidebar" aria-label="Meniu principal">
       <div class="sidebar-scrim" id="sidebarScrim"></div>
       <div class="sidebar-panel">
-        <div class="side-user">
-          <img class="side-avatar" src="assets/avatar.jpg" alt="" id="sideAvatar" />
-          <div class="side-user-txt">
-            <div class="side-user-name" id="sideUserName">Ioan Varga</div>
-            <div class="side-user-mail" id="sideUserMail">ioan.varga@email.com</div>
+        <div class="side-brand">
+          <div class="side-brand-mark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c2 4 6 5 6 9a6 6 0 1 1-12 0c0-4 4-5 6-9z"/></svg>
           </div>
-          <span class="pro-pill">Pro</span>
+          <div class="side-brand-txt">
+            <div class="side-brand-name">Dragon Life</div>
+            <div class="side-brand-tag">Sănătate &amp; echilibru</div>
+          </div>
         </div>
         <nav class="side-nav" id="sideNav" aria-label="Secțiuni">
           <a class="side-item" data-view="dashboard" href="#dashboard">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9v11h14V9"/></svg>
             <span>Dashboard</span>
-          </a>
-          <a class="side-item" data-view="routine" href="#routine">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg>
-            <span>Rutina de dimineață</span>
           </a>
           <a class="side-item" data-view="sleep" href="#sleep">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
@@ -76,6 +73,19 @@
           <a class="side-item" data-view="settings" href="#settings">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
             <span>Setări</span>
+          </a>
+          <div class="side-group">Rutine pe interval</div>
+          <a class="side-item" data-view="routine" href="#routine">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg>
+            <span>Dimineață <span class="side-hour">8&ndash;12</span></span>
+          </a>
+          <a class="side-item" data-view="routine_noon" href="#routine_noon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><path d="M12 3v1M12 20v1M3 12h1M20 12h1M5.6 5.6l.7.7M17.7 17.7l.7.7M5.6 18.4l.7-.7M17.7 6.3l.7-.7"/></svg>
+            <span>Amiază <span class="side-hour">12&ndash;17</span></span>
+          </a>
+          <a class="side-item" data-view="routine_evening" href="#routine_evening">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 18a5 5 0 1 1-10 0M12 3v9M8 8l4 4 4-4"/></svg>
+            <span>Seară <span class="side-hour">17&ndash;22</span></span>
           </a>
         </nav>
       </div>

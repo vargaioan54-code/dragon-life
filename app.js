@@ -26,37 +26,19 @@ const avg = (arr) => arr.length ? sum(arr) / arr.length : 0;
 // ─── state ──────────────────────────────────────────────────────────────────
 const STORAGE_KEY = 'dragon_life_v1';
 
-const DEFAULT_ROUTINE_ITEMS = [
-  { id: 'r1', name: 'Hidratare',            desc: '1 pahar cu apă',        icon: 'droplet', color: 'blue',   duration: 2 },
-  { id: 'r2', name: 'Respirație conștientă',desc: '5 minute',              icon: 'wind',    color: 'cyan',   duration: 5 },
-  { id: 'r3', name: 'Lumină naturală',      desc: '10 minute afară',       icon: 'sun',     color: 'amber',  duration: 10 },
-  { id: 'r4', name: 'Mișcare ușoară',       desc: '10 minute',             icon: 'move',    color: 'green',  duration: 10 },
-  { id: 'r5', name: 'Planul zilei',         desc: '3 priorități',          icon: 'list',    color: 'purple', duration: 5 },
-];
+const DEFAULT_ROUTINE_ITEMS = []; // empty — user builds their own
 
-const DEFAULT_HABITS = [
-  { id: 'h1', name: 'Dorm la 23:00',     freq: 'daily', color: 'blue',   started: isoOffset(-11), archived: false },
-  { id: 'h2', name: 'Meditez 10 min',    freq: 'daily', color: 'purple', started: isoOffset(-7),  archived: false },
-  { id: 'h3', name: 'Fără telefon dimineața', freq: 'daily', color: 'amber', started: isoOffset(-14), archived: false },
-  { id: 'h4', name: 'Activitate',        freq: 'daily', color: 'green',  started: isoOffset(-5),  archived: false },
-  { id: 'h5', name: 'Citit 20 minute',   freq: 'daily', color: 'pink',   started: isoOffset(-6),  archived: false },
-  { id: 'h6', name: '2L apă pe zi',      freq: 'daily', color: 'cyan',   started: isoOffset(-9),  archived: false },
-];
+const DEFAULT_HABITS = []; // empty — user builds their own
 
-const DEFAULT_RELAX = [
-  { id: 'x1', name: 'Respirație 4-7-8',   desc: '4 minute',   duration_min: 4, kind: 'breath',   color: 'green' },
-  { id: 'x2', name: 'Relaxare musculară', desc: '10 minute',  duration_min: 10, kind: 'muscle',  color: 'blue' },
-  { id: 'x3', name: 'Meditație ghidată',  desc: '12 minute',  duration_min: 12, kind: 'meditate',color: 'purple' },
-  { id: 'x4', name: 'Sunete pentru somn', desc: '30 minute',  duration_min: 30, kind: 'sound',   color: 'cyan' },
-];
+const DEFAULT_RELAX = []; // empty — user adds their own exercises
 
 const DEFAULT_STATE = {
-  user: { name: 'Ioan Varga', email: 'ioan.varga@email.com', avatar: 'assets/avatar.jpg' },
   goals: { steps: 10000, water_ml: 2500, sleep_hours: 8, kcal: 2200, protein: 150, carbs: 270, fat: 70, stress_max: 50 },
   prefs: { notifications: true, morning_reminder: '07:30', sleep_reminder: '22:30' },
-  routine_items: DEFAULT_ROUTINE_ITEMS,
-  habits: DEFAULT_HABITS,
-  relax_items: DEFAULT_RELAX,
+  routine_items: [],
+  habits: [],
+  relax_items: [],
+  custom_cards: [],         // user-built Dashboard cards
   entries: {},              // { isoDate: { sleep, mood, nutrition, activity, routine, journal, habits_done } }
   meta: { last_seen: todayISO(), streak_days: 1, created_at: todayISO() },
   notifs: [],
@@ -73,12 +55,14 @@ function load() {
     const merged = { ...structuredClone(DEFAULT_STATE), ...parsed };
     merged.goals = { ...DEFAULT_STATE.goals, ...(parsed.goals || {}) };
     merged.prefs = { ...DEFAULT_STATE.prefs, ...(parsed.prefs || {}) };
-    merged.user  = { ...DEFAULT_STATE.user,  ...(parsed.user  || {}) };
-    if (!merged.routine_items || !merged.routine_items.length) merged.routine_items = DEFAULT_ROUTINE_ITEMS;
-    if (!merged.habits) merged.habits = DEFAULT_HABITS;
-    if (!merged.relax_items) merged.relax_items = DEFAULT_RELAX;
+    delete merged.user;
+    if (!merged.routine_items) merged.routine_items = [];
+    merged.routine_items.forEach(it => { if (!it.slot) it.slot = 'morning'; });
+    if (!merged.habits) merged.habits = [];
+    if (!merged.relax_items) merged.relax_items = [];
     if (!merged.entries) merged.entries = {};
     if (!merged.notifs) merged.notifs = [];
+    if (!merged.custom_cards) merged.custom_cards = [];
     return merged;
   } catch (e) { return structuredClone(DEFAULT_STATE); }
 }
@@ -305,9 +289,23 @@ const ICONS = {
 };
 
 // ─── router ─────────────────────────────────────────────────────────────────
+const SLOT_TITLES = {
+  morning: { title: 'Rutina de dimineață', hint: 'Începe ziua cu calm și intenție', hours: '8–12', range: [8, 12], color: 'amber' },
+  noon:    { title: 'Rutina de amiază',    hint: 'Păstrează focus și energie',    hours: '12–17', range: [12, 17], color: 'green' },
+  evening: { title: 'Rutina de seară',     hint: 'Încheie ziua ușor și calm',   hours: '17–22', range: [17, 22], color: 'purple' },
+};
+function currentSlot() {
+  const h = new Date().getHours();
+  if (h >= 17 && h < 22) return 'evening';
+  if (h >= 12 && h < 17) return 'noon';
+  return 'morning';
+}
+
 const VIEW_TITLES = {
   dashboard: 'Dashboard',
   routine: 'Rutina de dimineață',
+  routine_noon: 'Rutina de amiază',
+  routine_evening: 'Rutina de seară',
   sleep: 'Somn',
   mood: 'Stare zilnică',
   nutrition: 'Nutriție',
@@ -405,10 +403,13 @@ VIEWS.dashboard = function() {
   const moodTxt = e.mood ? moodLabel(e.mood.rating) : '—';
   const steps  = e.activity ? e.activity.steps.toLocaleString('ro-RO') : '0';
   const kcal   = e.nutrition && e.nutrition.totals ? e.nutrition.totals.kcal : 0;
+  const hr = new Date().getHours();
+  const greet = hr < 5 ? 'Noapte liniștită' : hr < 12 ? 'Bună dimineața' : hr < 18 ? 'Bună ziua' : 'Bună seara';
+  const isEmpty = !state.routine_items.length && !state.habits.length && !e.sleep && !e.mood && !e.nutrition && !e.activity && !state.custom_cards.length;
 
   return `
-  <h1>Bună, ${esc(state.user.name.split(' ')[0])}! 👋</h1>
-  <p class="subtitle">Ai grijă de tine, în fiecare zi.</p>
+  <h1>${greet}! 👋</h1>
+  <p class="subtitle">${isEmpty ? 'Personalizează app-ul după tine. Adaugă orice secțiune cu +' : 'Ai grijă de tine, în fiecare zi.'}</p>
 
   <div class="balance-hero mt-14">
     <div class="ring" style="width:88px;height:88px">
@@ -449,18 +450,27 @@ VIEWS.dashboard = function() {
     </div>
   </div>
 
-  <div class="section-title"><h2>Astăzi</h2><button class="link" data-action="go-routine">Vezi tot</button></div>
-  <div class="card tap" data-view="routine">
-    <div class="row" style="gap:12px">
-      <div class="m-icon amber">${ICONS.sun}</div>
-      <div style="flex:1">
-        <div style="font-weight:600;font-size:14px">Rutina de dimineață</div>
-        <div class="subtitle">${routineDone}/${routineTotal} pași completați</div>
+  <div class="section-title"><h2>Rutinele zilei</h2><span class="chip green">${currentSlot() === 'morning' ? 'Dimineață' : currentSlot() === 'noon' ? 'Amiază' : 'Seară'}</span></div>
+  ${['morning', 'noon', 'evening'].map(slot => {
+    const meta = SLOT_TITLES[slot];
+    const items = state.routine_items.filter(it => it.slot === slot);
+    const done  = items.filter(it => e.routine && e.routine.completed.includes(it.id)).length;
+    const p     = items.length ? done / items.length : 0;
+    const view  = slot === 'morning' ? 'routine' : `routine_${slot}`;
+    const iconName = slot === 'morning' ? 'sun' : slot === 'noon' ? 'bolt' : 'moon';
+    const isNow = currentSlot() === slot;
+    return `<div class="card tap" data-view="${view}" style="${isNow ? 'border-color:var(--green)' : ''}">
+      <div class="row" style="gap:12px">
+        <div class="m-icon ${meta.color}">${ICONS[iconName]}</div>
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:14px">${esc(meta.title)} <span class="chip" style="margin-left:6px">${meta.hours}</span></div>
+          <div class="subtitle">${done}/${items.length} pași completați</div>
+        </div>
+        <div class="chip ${meta.color}">${Math.round(p * 100)}%</div>
       </div>
-      <div class="chip green">${Math.round(routinePct * 100)}%</div>
-    </div>
-    <div class="pbar mt-10"><i style="width:${(routinePct*100).toFixed(0)}%"></i></div>
-  </div>
+      <div class="pbar ${meta.color} mt-10"><i style="width:${(p*100).toFixed(0)}%"></i></div>
+    </div>`;
+  }).join('')}
 
   <div class="card">
     <div class="card-head"><h3>Progres obiceiuri</h3><span class="chip">${e.habits_done.length}/${activeHabits}</span></div>
@@ -468,65 +478,96 @@ VIEWS.dashboard = function() {
     <div class="subtitle mt-6">${Math.round(habitsPct * 100)}% din obiceiurile active</div>
   </div>
 
+  <div class="section-title"><h2>Cardurile mele</h2><button class="link" data-action="add-card">+ adaugă</button></div>
+  ${state.custom_cards.length ? state.custom_cards.map(c => `
+    <div class="card tap" ${c.link ? `data-view="${c.link}"` : `data-action="open-card" data-id="${c.id}"`}>
+      <div class="row" style="gap:12px">
+        <div class="m-icon ${c.color || 'green'}">${ICONS[c.icon] || ICONS.plus}</div>
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:14px">${esc(c.title)}</div>
+          ${c.subtitle ? `<div class="subtitle">${esc(c.subtitle)}</div>` : ''}
+        </div>
+        <button class="h-action" data-action="edit-card" data-id="${c.id}" onclick="event.stopPropagation()">${ICONS.edit}</button>
+        <button class="h-action" data-action="del-card" data-id="${c.id}" onclick="event.stopPropagation()">${ICONS.trash}</button>
+      </div>
+      ${c.note ? `<div class="subtitle mt-6" style="white-space:pre-line">${esc(c.note)}</div>` : ''}
+    </div>
+  `).join('') : `
+    <div class="empty">
+      <div class="em-emoji">➕</div>
+      <div class="em-title">Niciun card personal</div>
+      <div class="em-hint">Apasă + adaugă pentru a-ți construi propriile scurtături.</div>
+    </div>
+  `}
+
+  ${Object.keys(state.entries).length > 0 ? `
   <div class="section-title"><h2>Ultimele 7 zile</h2><button class="link" data-view="progress">Progres complet</button></div>
   <div class="card">
     <div class="spread"><div class="subtitle">Scor de echilibru</div><div class="chip green">${bal}</div></div>
     ${sparklineSVG(series('balance', 7))}
   </div>
+  ` : ''}
   `;
 };
 
-// —— Rutina de dimineață ——
-VIEWS.routine = function() {
-  const e = todayEntry();
-  const done = e.routine ? e.routine.completed : [];
-  const items = state.routine_items;
-  const pct = items.length ? done.length / items.length : 0;
-  return `
-  <div class="row" style="gap:10px;margin-bottom:6px">
-    <button class="icon-btn" data-action="back">${ICONS.back}</button>
-    <div style="flex:1"><div style="font-size:11px;color:var(--text-dim)">Începe ziua cu calm și intenție</div></div>
-    <button class="icon-btn" data-action="add-routine" aria-label="Adaugă">${ICONS.plus}</button>
-  </div>
-
-  <div class="card">
-    ${items.map(it => routineRow(it, done.includes(it.id))).join('')}
-  </div>
-
-  <div class="card">
-    <div class="card-head"><h3>Progres rutină</h3><span class="chip green">${Math.round(pct*100)}%</span></div>
-    <div class="pbar"><i style="width:${(pct*100).toFixed(0)}%"></i></div>
-    <div class="subtitle mt-6">${done.length} din ${items.length} pași completați</div>
-  </div>
-
-  <div class="card">
-    <div class="card-head"><h3>Istoric — 7 zile</h3></div>
-    <div class="dow-row">
-      ${lastNDays(7).map(iso => {
-        const en = state.entries[iso];
-        const c = en && en.routine ? en.routine.completed.length : 0;
-        const t = state.routine_items.length;
-        const d = parseISO(iso);
-        return `<div class="dow-dot ${c >= Math.max(1, t*0.8) ? 'done' : ''}"><span class="d"></span><span>${dayName(d)}</span></div>`;
-      }).join('')}
+// —— Rutinele (dimineață / amiază / seară) ——
+function routineViewForSlot(slot) {
+  return function() {
+    const meta = SLOT_TITLES[slot];
+    const e = todayEntry();
+    const done = e.routine ? e.routine.completed : [];
+    const items = state.routine_items.filter(it => it.slot === slot);
+    const doneHere = items.filter(it => done.includes(it.id)).length;
+    const pct = items.length ? doneHere / items.length : 0;
+    return `
+    <div class="row" style="gap:10px;margin-bottom:6px">
+      <button class="icon-btn" data-action="back">${ICONS.back}</button>
+      <div style="flex:1;text-align:center"><div style="font-size:11px;color:var(--text-dim)">${esc(meta.hint)} · ${meta.hours}</div></div>
+      <button class="icon-btn" data-action="add-routine" data-slot="${slot}" aria-label="Adaugă">${ICONS.plus}</button>
     </div>
-  </div>
-  `;
 
-  function routineRow(item, done) {
-    return `<div class="list-row ${done ? 'done' : ''}" data-action="toggle-routine" data-id="${item.id}">
-      <div class="icn ${done ? 'done' : ''}">${done ? ICONS.check : (ICONS[item.icon] || ICONS.check)}</div>
-      <div>
-        <div class="title">${esc(item.name)}</div>
-        <div class="sub">${esc(item.desc)} · ${item.duration} min</div>
+    ${items.length ? `<div class="card">${items.map(it => routineRow(it, done.includes(it.id))).join('')}</div>` : `
+      <div class="empty"><div class="em-emoji">🌟</div><div class="em-title">Nimic în această rutină</div><div class="em-hint">Apasă + pentru a adăuga o activitate pentru ${meta.hours}.</div></div>
+    `}
+
+    <div class="card">
+      <div class="card-head"><h3>Progres ${esc(meta.title.toLowerCase())}</h3><span class="chip ${meta.color}">${Math.round(pct*100)}%</span></div>
+      <div class="pbar ${meta.color}"><i style="width:${(pct*100).toFixed(0)}%"></i></div>
+      <div class="subtitle mt-6">${doneHere} din ${items.length} pași completați</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head"><h3>Istoric — 7 zile</h3></div>
+      <div class="dow-row">
+        ${lastNDays(7).map(iso => {
+          const en = state.entries[iso];
+          const c = en && en.routine ? en.routine.completed.filter(id => items.some(it => it.id === id)).length : 0;
+          const t = items.length;
+          const d = parseISO(iso);
+          return `<div class="dow-dot ${t > 0 && c >= Math.max(1, t*0.8) ? 'done' : ''}"><span class="d"></span><span>${dayName(d)}</span></div>`;
+        }).join('')}
       </div>
-      <div class="row" style="gap:4px">
-        <button class="icon-btn" style="width:32px;height:32px;background:transparent;border:0" data-action="edit-routine" data-id="${item.id}" aria-label="Editează">${ICONS.edit}</button>
-        <button class="icon-btn" style="width:32px;height:32px;background:transparent;border:0" data-action="del-routine" data-id="${item.id}" aria-label="Șterge">${ICONS.trash}</button>
-      </div>
-    </div>`;
-  }
-};
+    </div>
+    `;
+
+    function routineRow(item, done) {
+      return `<div class="list-row ${done ? 'done' : ''}" data-action="toggle-routine" data-id="${item.id}">
+        <div class="icn ${done ? 'done' : ''}">${done ? ICONS.check : (ICONS[item.icon] || ICONS.check)}</div>
+        <div>
+          <div class="title">${esc(item.name)}</div>
+          <div class="sub">${esc(item.desc)} · ${item.duration} min</div>
+        </div>
+        <div class="row" style="gap:4px">
+          <button class="icon-btn" style="width:32px;height:32px;background:transparent;border:0" data-action="edit-routine" data-id="${item.id}" aria-label="Editează">${ICONS.edit}</button>
+          <button class="icon-btn" style="width:32px;height:32px;background:transparent;border:0" data-action="del-routine" data-id="${item.id}" aria-label="Șterge">${ICONS.trash}</button>
+        </div>
+      </div>`;
+    }
+  };
+}
+VIEWS.routine         = routineViewForSlot('morning');
+VIEWS.routine_noon    = routineViewForSlot('noon');
+VIEWS.routine_evening = routineViewForSlot('evening');
 
 // —— Somn ——
 VIEWS.sleep = function() {
@@ -1038,7 +1079,6 @@ VIEWS.stats = function() {
 
 // —— Setări ——
 VIEWS.settings = function() {
-  const u = state.user;
   return `
   <div class="row" style="gap:10px">
     <button class="icon-btn" data-action="back">${ICONS.back}</button>
@@ -1046,18 +1086,6 @@ VIEWS.settings = function() {
     <div style="width:40px"></div>
   </div>
 
-  <div class="card tap" data-action="edit-profile" style="margin-top:8px">
-    <div class="row" style="gap:12px">
-      <img src="${esc(u.avatar)}" alt="" style="width:44px;height:44px;border-radius:50%"/>
-      <div style="flex:1">
-        <div style="font-weight:600">${esc(u.name)}</div>
-        <div class="subtitle">${esc(u.email)}</div>
-      </div>
-      <div class="arrow">${ICONS.arrow}</div>
-    </div>
-  </div>
-
-  ${settingRow('user', 'Profil', 'edit-profile')}
   ${settingRow('target', 'Obiective & preferințe', 'edit-goals')}
   ${settingRow('bell', 'Mementouri', 'edit-notifs')}
   ${settingRow('device', 'Dispozitive conectate', 'devices')}
@@ -1132,6 +1160,62 @@ function renderSoft() { // avoid resetting scroll for the search
 const ACTIONS = {};
 
 ACTIONS['back'] = () => go('dashboard');
+ACTIONS['go-routine'] = () => go('routine');
+
+// —— Custom cards (Dashboard prebuilder) ——
+const CARD_ICONS = ['plus','check','heart','bolt','moon','sun','wind','droplet','list','activity','meal','book','target','user','shield','bell','info','edit','archive','play','more'];
+const CARD_COLORS = ['green','blue','amber','purple','pink','cyan','red'];
+const CARD_LINKS = [
+  ['', 'Fără link (doar notă)'],
+  ['dashboard','Dashboard'],['routine','Rutina de dimineață'],['routine_noon','Rutina de amiază'],['routine_evening','Rutina de seară'],
+  ['sleep','Somn'],['mood','Stare zilnică'],['nutrition','Nutriție'],['activity','Activitate'],
+  ['journal','Jurnal'],['habits','Obiceiuri'],['progress','Progres'],['relax','Relaxare'],['stats','Statistici'],['settings','Setări'],
+];
+ACTIONS['add-card']  = () => openCardModal();
+ACTIONS['edit-card'] = (el) => openCardModal(el.dataset.id);
+ACTIONS['del-card']  = (el) => {
+  const id = el.dataset.id;
+  confirmDialog('Ștergi cardul?', () => {
+    state.custom_cards = state.custom_cards.filter(c => c.id !== id);
+    save(); toast('Șters'); render();
+  });
+};
+ACTIONS['open-card'] = (el) => {
+  const c = state.custom_cards.find(x => x.id === el.dataset.id);
+  if (!c) return;
+  openInfoModal(c.title, c.note || c.subtitle || '(fără conținut)');
+};
+function openCardModal(id) {
+  const editing = id ? state.custom_cards.find(c => c.id === id) : null;
+  const cur = editing || { title: '', subtitle: '', icon: 'plus', color: 'green', link: '', note: '' };
+  openModal(`
+    <div class="modal-head"><h3>${editing ? 'Editează' : 'Adaugă'} card</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
+    <div class="field"><label>Titlu</label><input class="input" id="ccT" value="${esc(cur.title)}" placeholder="Ex. Antrenament de seară"/></div>
+    <div class="field"><label>Subtitlu (opțional)</label><input class="input" id="ccS" value="${esc(cur.subtitle)}" placeholder="Ex. 30 minute, după cină"/></div>
+    <div class="grid-2">
+      <div class="field"><label>Icon</label><select class="input" id="ccI">${CARD_ICONS.map(k => `<option value="${k}" ${cur.icon===k?'selected':''}>${k}</option>`).join('')}</select></div>
+      <div class="field"><label>Culoare</label><select class="input" id="ccC">${CARD_COLORS.map(k => `<option value="${k}" ${cur.color===k?'selected':''}>${k}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>Acțiune la tap</label><select class="input" id="ccL">${CARD_LINKS.map(([v,l]) => `<option value="${v}" ${cur.link===v?'selected':''}>${l}</option>`).join('')}</select></div>
+    <div class="field"><label>Notă (opțional, apare la tap dacă n-are link)</label><textarea class="input" id="ccN" placeholder="Text personalizat">${esc(cur.note)}</textarea></div>
+    <div class="row" style="gap:8px">
+      <button class="btn primary block" id="ccSave">${editing ? 'Salvează' : 'Adaugă'}</button>
+      ${editing ? `<button class="btn danger" id="ccDel">${ICONS.trash}</button>` : ''}
+    </div>
+  `);
+  $('#ccSave').onclick = () => {
+    const title = $('#ccT').value.trim();
+    if (!title) return toast('Titlul e obligatoriu');
+    const data = { title, subtitle: $('#ccS').value.trim(), icon: $('#ccI').value, color: $('#ccC').value, link: $('#ccL').value, note: $('#ccN').value };
+    if (editing) Object.assign(editing, data);
+    else state.custom_cards.push({ id: uid(), ...data });
+    save(); closeModal(); toast(editing ? 'Salvat' : 'Adăugat'); render();
+  };
+  if (editing) $('#ccDel').onclick = () => {
+    state.custom_cards = state.custom_cards.filter(c => c.id !== id);
+    save(); closeModal(); toast('Șters'); render();
+  };
+}
 
 // —— Routine actions ——
 ACTIONS['toggle-routine'] = (el) => {
@@ -1146,7 +1230,7 @@ ACTIONS['toggle-routine'] = (el) => {
   toast(idx >= 0 ? 'Pas anulat' : 'Pas completat ✓');
   render();
 };
-ACTIONS['add-routine'] = () => openRoutineModal();
+ACTIONS['add-routine'] = (el) => openRoutineModal(null, el && el.dataset.slot);
 ACTIONS['edit-routine'] = (el) => openRoutineModal(el.dataset.id);
 ACTIONS['del-routine'] = (el) => {
   const id = el.dataset.id;
@@ -1158,18 +1242,24 @@ ACTIONS['del-routine'] = (el) => {
     save(); toast('Șters'); render();
   });
 };
-function openRoutineModal(editId) {
+function openRoutineModal(editId, defaultSlot) {
   const editing = editId ? state.routine_items.find(x => x.id === editId) : null;
+  const slot = editing ? editing.slot : (defaultSlot || currentSlot());
   openModal(`
     <div class="modal-head"><h3>${editing ? 'Editează' : 'Adaugă'} activitate</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
     <div class="field"><label>Nume</label><input class="input" id="rN" value="${esc(editing ? editing.name : '')}" placeholder="Ex. Hidratare"/></div>
     <div class="field"><label>Descriere</label><input class="input" id="rD" value="${esc(editing ? editing.desc : '')}" placeholder="Ex. 1 pahar cu apă"/></div>
     <div class="grid-2">
-      <div class="field"><label>Durată (min)</label><input class="input" id="rM" type="number" min="1" max="120" value="${editing ? editing.duration : 5}"/></div>
-      <div class="field"><label>Culoare</label><select class="input" id="rC">
-        ${['green','blue','amber','purple','pink','cyan','red'].map(c => `<option value="${c}" ${editing && editing.color===c?'selected':''}>${c}</option>`).join('')}
+      <div class="field"><label>Interval</label><select class="input" id="rS">
+        <option value="morning" ${slot==='morning'?'selected':''}>Dimineață (8–12)</option>
+        <option value="noon"    ${slot==='noon'?'selected':''}>Amiază (12–17)</option>
+        <option value="evening" ${slot==='evening'?'selected':''}>Seară (17–22)</option>
       </select></div>
+      <div class="field"><label>Durată (min)</label><input class="input" id="rM" type="number" min="1" max="120" value="${editing ? editing.duration : 5}"/></div>
     </div>
+    <div class="field"><label>Culoare</label><select class="input" id="rC">
+      ${['green','blue','amber','purple','pink','cyan','red'].map(c => `<option value="${c}" ${editing && editing.color===c?'selected':''}>${c}</option>`).join('')}
+    </select></div>
     <button class="btn primary block" id="rSave">${editing ? 'Salvează' : 'Adaugă'}</button>
   `);
   $('#rSave').onclick = () => {
@@ -1177,9 +1267,10 @@ function openRoutineModal(editId) {
     const desc = $('#rD').value.trim();
     const duration = parseInt($('#rM').value, 10) || 5;
     const color = $('#rC').value;
+    const slot = $('#rS').value;
     if (!name) return toast('Numele e obligatoriu');
-    if (editing) Object.assign(editing, { name, desc, duration, color });
-    else state.routine_items.push({ id: uid(), name, desc, duration, color, icon: 'list' });
+    if (editing) Object.assign(editing, { name, desc, duration, color, slot });
+    else state.routine_items.push({ id: uid(), name, desc, duration, color, slot, icon: 'list' });
     save(); closeModal(); toast(editing ? 'Actualizat' : 'Adăugat'); render();
   };
 }
@@ -1541,25 +1632,6 @@ function openRelaxTimer(x) {
 }
 
 // —— Settings ——
-ACTIONS['edit-profile'] = () => {
-  const u = state.user;
-  openModal(`
-    <div class="modal-head"><h3>Profil</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
-    <div class="field"><label>Nume</label><input class="input" id="pN" value="${esc(u.name)}"/></div>
-    <div class="field"><label>Email</label><input class="input" id="pE" type="email" value="${esc(u.email)}"/></div>
-    <div class="field"><label>Avatar (URL)</label><input class="input" id="pA" value="${esc(u.avatar)}"/></div>
-    <button class="btn primary block" id="pSave">Salvează</button>
-  `);
-  $('#pSave').onclick = () => {
-    u.name = $('#pN').value.trim() || u.name;
-    u.email = $('#pE').value.trim() || u.email;
-    u.avatar = $('#pA').value.trim() || u.avatar;
-    $('#sideUserName').textContent = u.name;
-    $('#sideUserMail').textContent = u.email;
-    $('#sideAvatar').src = u.avatar;
-    save(); closeModal(); toast('Profil actualizat'); render();
-  };
-};
 ACTIONS['edit-goals'] = () => {
   const g = state.goals;
   openModal(`
@@ -1677,10 +1749,6 @@ function initShellWiring() {
     go(view);
     $('#sidebar').classList.remove('open');
   });
-  // fill sidebar user
-  $('#sideUserName').textContent = state.user.name;
-  $('#sideUserMail').textContent = state.user.email;
-  $('#sideAvatar').src = state.user.avatar;
   // route from hash
   window.addEventListener('hashchange', () => {
     const v = location.hash.replace('#','');
@@ -1730,7 +1798,6 @@ window.DL = {
 
 document.addEventListener('DOMContentLoaded', () => {
   state = load();
-  if (!Object.keys(state.entries).length) seedDemoHistory();
   save();
   updateStreak();
   initShellWiring();
