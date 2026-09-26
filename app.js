@@ -1,35 +1,45 @@
 'use strict';
-// ===== STATE & PERSISTENCE =====
+
+/* =========================================================
+   Dragon Life — full app with push + all buttons wired
+   ========================================================= */
+
 const KEY = 'dragonlife.v2';
-
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function uid() {
-  return Math.random().toString(36).slice(2, 9) + Date.now().toString(36);
-}
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36);
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const nowTime = () => {
+  const d = new Date();
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+};
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
 const DEFAULT_STATE = {
   v: 2,
   currentTab: 'dashboard',
   profile: {
-    name: 'Ionut',
-    photo: null,
-    motto: 'Concentreaza-te pe progres, nu pe perfectiune.'
+    name: 'Ionuț',
+    photo: 'assets/avatar.jpg',
+    motto: 'Concentrează-te pe progres, nu pe perfecțiune.',
+    userId: null,
   },
   tasks: [],
   habits: [],
   habitHistory: {},
   health: {
     date: '',
-    bpm: 0,
-    energy: 0,
+    energy: 85,
     water: 0,
     waterGoal: 2500,
     meals: { mic: false, pranz: false, gustare: false, cina: false },
-    sleepFrom: '',
-    sleepTo: ''
+    sleepFrom: '23:25',
+    sleepTo: '07:00',
+    bedtimeNotify: false,
+    wakeNotify: false,
+    bedtimeNotifyId: null,
+    wakeNotifyId: null,
   },
   healthHistory: [],
   stats: {
@@ -39,418 +49,1539 @@ const DEFAULT_STATE = {
     lastDate: null,
     pointsHistory: [],
     tasksHistory: [],
-    sleepHistory: []
+    sleepHistory: [],
+    bpmHistory: [],
+    energyHistory: [],
   },
   notes: [],
   plan: [],
   usage: { dates: [], currentStreak: 0, longestStreak: 0 },
   notifications: [],
-  quoteIndex: 0
+  push: { enabled: false, permission: 'default', serverOk: null, checkedAt: 0 },
+  quoteIndex: 0,
+  localFiredToday: {},
+  localFiredDate: '',
+  monthlyArchive: [],
+  lastMonthReset: '',
 };
 
-let state = {};
+const SEED_TASKS = [
+  { title: 'Antrenament dimineață', emoji: '💪', time: '07:00', done: true },
+  { title: 'Citit 20 pagini', emoji: '📖', time: '08:30', done: true },
+  { title: 'Lucru proiect Dragons', emoji: '💼', time: '10:00', done: false },
+  { title: 'Mese sănătoase', emoji: '🥗', time: '13:00', done: false },
+  { title: 'Fără ecrane seara', emoji: '📱', time: '22:00', done: false },
+];
+const SEED_LONG = [
+  { title: 'Revizuire săptămânală (Reflect)', emoji: '📝', time: '20:00', scope: 'weekly',  offsetDays: 3 },
+  { title: 'Sport 3x săptămâna asta',         emoji: '🏋️', time: '',      scope: 'weekly',  offsetDays: 6 },
+  { title: 'Consultație medicală',           emoji: '🩺', time: '10:00', scope: 'monthly', offsetDays: 14 },
+  { title: 'Buget lunar + facturi',          emoji: '💰', time: '',      scope: 'monthly', offsetDays: 25 },
+];
+const SEED_HABITS = [
+  { title: 'Hidratare',  emoji: '💧', time: '10:00', done: true  },
+  { title: 'Meditație',  emoji: '🧘', time: '07:30', done: true  },
+  { title: 'Citit',      emoji: '📖', time: '20:00', done: true  },
+  { title: 'Somn 7h+',   emoji: '🌙', time: '23:00', done: true  },
+  { title: 'Fără zahăr', emoji: '🚫', time: '',      done: false },
+  { title: 'Jurnal',     emoji: '✏️', time: '21:00', done: true  },
+  { title: 'Învățare',   emoji: '🧠', time: '',      done: false },
+];
+const QUOTES = [
+  { text: 'Disciplină astăzi, libertate mâine.', author: '– Tu, peste 1 an' },
+  { text: 'Nu conteaza cat de incet mergi, atat timp cat nu te opresti.', author: '– Confucius' },
+  { text: 'Fiecare zi este o noua sansa de a-ti schimba viata.', author: '– Anonim' },
+  { text: 'Disciplina este puntea dintre obiective si realizari.', author: '– Jim Rohn' },
+];
 
+/* ===== STATE PERSISTENCE ===== */
+let state = {};
 function deepMerge(target, source) {
   const out = Object.assign({}, target);
   for (const k of Object.keys(source)) {
     if (source[k] !== null && typeof source[k] === 'object' && !Array.isArray(source[k])) {
       out[k] = deepMerge(target[k] || {}, source[k]);
-    } else {
-      out[k] = target[k] !== undefined ? target[k] : source[k];
+    } else if (source[k] !== undefined) {
+      out[k] = source[k];
     }
   }
   return out;
 }
-
 function load() {
   try {
     const raw = localStorage.getItem(KEY);
-    if (!raw) {
-      state = JSON.parse(JSON.stringify(DEFAULT_STATE));
-      return;
-    }
+    if (!raw) { state = JSON.parse(JSON.stringify(DEFAULT_STATE)); seedIfEmpty(); return; }
     const parsed = JSON.parse(raw);
-    // v1 -> v2 migration
-    if (!parsed.v || parsed.v < 2) {
-      state = JSON.parse(JSON.stringify(DEFAULT_STATE));
-      if (parsed.tasks) state.tasks = parsed.tasks.map(t => ({ ...DEFAULT_STATE.tasks[0], ...t }));
-      if (parsed.habits) state.habits = parsed.habits.map(h => ({ ...DEFAULT_STATE.habits[0], ...h }));
-      if (parsed.profile) state.profile = { ...DEFAULT_STATE.profile, ...parsed.profile };
-      if (parsed.stats) state.stats = { ...DEFAULT_STATE.stats, ...parsed.stats };
-      state.v = 2;
-      return;
-    }
     state = deepMerge(JSON.parse(JSON.stringify(DEFAULT_STATE)), parsed);
+    if (!state.profile.photo) state.profile.photo = 'assets/avatar.jpg';
+    if (!state.profile.userId) state.profile.userId = 'dl_' + uid();
+    seedIfEmpty();
   } catch (e) {
     console.error('load error', e);
     state = JSON.parse(JSON.stringify(DEFAULT_STATE));
+    state.profile.userId = 'dl_' + uid();
+    seedIfEmpty();
   }
 }
-
 function save() {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(state));
-  } catch (e) {
-    console.error('save error', e);
-  }
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { console.error('save error', e); }
 }
-
-// ===== QUOTES =====
-const QUOTES = [
-  { text: 'Succesul nu este final, esecul nu este fatal: curajul de a continua este cel care conteaza.', author: 'Winston Churchill' },
-  { text: 'Disciplina este puntea dintre obiective si realizari.', author: 'Jim Rohn' },
-  { text: 'Nu astepta momentul perfect. Incepe si fa-l perfect.', author: 'Anonim' },
-  { text: 'Fiecare zi este o noua sansa de a-ti schimba viata.', author: 'Anonim' },
-  { text: 'Cele mai mari descoperiri ale generatiei mele sunt ca oamenii isi pot schimba viata schimbandu-si atitudinea.', author: 'William James' },
-  { text: 'Nu conteaza cat de incet mergi, atat timp cat nu te opresti.', author: 'Confucius' },
-  { text: 'Fericirea nu este ceva gata facut. Vine din propriile tale actiuni.', author: 'Dalai Lama' },
-  { text: 'Fii schimbarea pe care vrei sa o vezi in lume.', author: 'Mahatma Gandhi' }
-];
-
-// ===== SVG HELPERS =====
-function sparkline(data, w, h, color) {
-  w = w || 80; h = h || 28; color = color || '#6366f1';
-  let d = data && data.length >= 2 ? data.slice() : null;
-  if (!d) {
-    d = [30, 45, 35, 55, 40, 60, 50, 70, 55, 65];
-  }
-  if (d.length < 2) d = d.concat([d[0] * 1.1, d[0] * 0.9, d[0] * 1.2]);
-  const min = Math.min(...d);
-  const max = Math.max(...d);
-  const range = max - min || 1;
-  const step = w / (d.length - 1);
-  const pts = d.map((v, i) => {
-    const x = i * step;
-    const y = h - 4 - ((v - min) / range) * (h - 8);
-    return [x, y];
-  });
-  const pathD = pts.map((p, i) => (i === 0 ? `M${p[0]},${p[1]}` : `L${p[0]},${p[1]}`)).join(' ');
-  const fillD = pathD + ` L${w},${h} L0,${h} Z`;
-  const id = 'sg' + Math.random().toString(36).slice(2, 7);
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="${color}" stop-opacity="0.3"/>
-        <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
-      </linearGradient>
-    </defs>
-    <path d="${fillD}" fill="url(#${id})"/>
-    <path d="${pathD}" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-  </svg>`;
-}
-
-function donutChart(done, total, size) {
-  size = size || 110;
-  const pct = total > 0 ? done / total : 0;
-  const r = (size - 16) / 2;
-  const cx = size / 2;
-  const cy = size / 2;
-  const circ = 2 * Math.PI * r;
-  const dash = pct * circ;
-  const gap = circ - dash;
-  const startAngle = -Math.PI / 2;
-  const endAngle = startAngle + pct * 2 * Math.PI;
-  const gradStart = pct > 0.5 ? '#a855f7' : '#6366f1';
-  const gradEnd = '#22c55e';
-  const id = 'dg' + Math.random().toString(36).slice(2, 7);
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-    <defs>
-      <linearGradient id="${id}" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" stop-color="${gradStart}"/>
-        <stop offset="100%" stop-color="${gradEnd}"/>
-      </linearGradient>
-    </defs>
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="12"/>
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${id})" stroke-width="12"
-      stroke-dasharray="${dash.toFixed(2)} ${gap.toFixed(2)}"
-      stroke-dashoffset="${(circ * 0.25).toFixed(2)}"
-      stroke-linecap="round"
-      transform="rotate(-90 ${cx} ${cy})"
-    />
-    <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="central" fill="#f0f0f8" font-size="18" font-weight="800" font-family="system-ui,sans-serif">${done}/${total}</text>
-  </svg>`;
-}
-
-// ===== TIME HELPERS =====
-function sleepMinutes(from, to) {
-  const [fh, fm] = (from || '23:00').split(':').map(Number);
-  const [th, tm] = (to || '06:30').split(':').map(Number);
-  let start = fh * 60 + fm;
-  let end = th * 60 + tm;
-  if (end <= start) end += 24 * 60;
-  return end - start;
-}
-
-function sleepLabel(min) {
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
-}
-
-// ===== NIGHT MODE =====
-function isNightMode() {
-  const sf = state.health.sleepFrom;
-  const st = state.health.sleepTo;
-  if (!sf || !st) return false;
-  const now = new Date();
-  const cur = now.getHours() * 60 + now.getMinutes();
-  const [fh, fm] = sf.split(':').map(Number);
-  const [th, tm] = st.split(':').map(Number);
-  const start = fh * 60 + fm;
-  const end = th * 60 + tm;
-  if (start > end) return cur >= start || cur < end;
-  return cur >= start && cur < end;
-}
-
-function showNightMode() {
-  const existing = document.getElementById('nightModeScreen');
-  if (existing) return;
-  const sf = state.health.sleepFrom;
-  const st = state.health.sleepTo;
-  const overlay = document.createElement('div');
-  overlay.id = 'nightModeScreen';
-  overlay.innerHTML = `
-    <div class="night-clock" id="nightClock"></div>
-    <div class="night-icon">🌙</div>
-    <div class="night-title">Mod Noapte</div>
-    <div class="night-sub">Trezire la ${st || '—'}</div>
-    <button class="night-unlock" id="nightUnlock">Deblocheaza</button>
-  `;
-  document.body.appendChild(overlay);
-  function updateClock() {
-    const n = new Date();
-    const el = document.getElementById('nightClock');
-    if (el) el.textContent = n.getHours().toString().padStart(2,'0') + ':' + n.getMinutes().toString().padStart(2,'0');
-  }
-  updateClock();
-  const timer = setInterval(updateClock, 30000);
-  document.getElementById('nightUnlock').addEventListener('click', () => {
-    clearInterval(timer);
-    overlay.remove();
-  });
-}
-
-function checkNightMode() {
-  if (isNightMode()) showNightMode();
-  else {
-    const el = document.getElementById('nightModeScreen');
-    if (el) el.remove();
-  }
-}
-
-async function scheduleSleepNotifs(sf, st, name) {
-  if (!sf || !st) return;
-  const prev = state.health._sleepNotifIds || {};
-  if (prev.bed) fetch('/api?action=cancel', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id: prev.bed }) }).catch(()=>{});
-  if (prev.wake) fetch('/api?action=cancel', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ id: prev.wake }) }).catch(()=>{});
-
-  const extId = state.profile._pushId;
-  if (!extId) return;
-
-  function nextOccurrence(hh, mm) {
-    const now = new Date();
-    const t = new Date(now);
-    t.setHours(hh, mm, 0, 0);
-    if (t <= now) t.setDate(t.getDate() + 1);
-    return t.toISOString();
-  }
-
-  const [bh, bm] = sf.split(':').map(Number);
-  const [wh, wm] = st.split(':').map(Number);
-
-  const [bedRes, wakeRes] = await Promise.all([
-    fetch('/api?action=schedule', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ externalId: extId, title: '🌙 Timp de culcare!', body: `Noapte buna, ${name}! Somn usor 😴`, sendAt: nextOccurrence(bh, bm) }) }).then(r=>r.json()).catch(()=>({})),
-    fetch('/api?action=schedule', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ externalId: extId, title: '☀️ Buna dimineata!', body: `Trezire usoara, ${name}! 🌅 O zi buna!`, sendAt: nextOccurrence(wh, wm) }) }).then(r=>r.json()).catch(()=>({}) )
-  ]);
-
-  state.health._sleepNotifIds = { bed: bedRes.id || null, wake: wakeRes.id || null };
-  save();
-}
-
-// ===== DRAGON SCORE ENGINE =====
-function computeDragonScore() {
+function seedIfEmpty() {
   const today = todayISO();
-  const now = new Date();
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-
-  // ── TASKS (weight 35%) ──────────────────────────────────────────
-  const todayTasks = state.tasks.filter(t => t.date === today);
-  const doneTasks = todayTasks.filter(t => t.done).length;
-  const totalTasks = todayTasks.length;
-  let tasksScore = 0;
-  if (totalTasks === 0) {
-    tasksScore = 0;
+  if (!state.tasks.length) {
+    state.tasks = SEED_TASKS.map((t) => ({ id: uid(), title: t.title, emoji: t.emoji, date: today, time: t.time, done: !!t.done, chip: null, notifyId: null, scope: 'daily' }));
+    const base = new Date();
+    SEED_LONG.forEach((t) => {
+      const d = new Date(base); d.setDate(base.getDate() + t.offsetDays);
+      state.tasks.push({ id: uid(), title: t.title, emoji: t.emoji, date: d.toISOString().slice(0, 10), time: t.time, done: false, chip: null, notifyId: null, scope: t.scope });
+    });
   } else {
-    const basePct = (doneTasks / totalTasks) * 100;
-    const allDoneBonus = doneTasks === totalTasks ? 15 : 0;
-    const workBonus = Math.min(15, todayTasks.filter(t => t.done && t.chip === 'work').length * 5);
-    const overduePenalty = todayTasks.filter(t => {
-      if (t.done) return false;
-      const [th, tm] = (t.time || '23:59').split(':').map(Number);
-      return (th * 60 + tm) < nowMin;
-    }).length * 5;
-    tasksScore = Math.min(100, Math.max(0, basePct + allDoneBonus + workBonus - overduePenalty));
+    state.tasks.forEach((t) => { if (!t.scope) t.scope = 'daily'; });
   }
-
-  // ── HABITS (weight 30%) ─────────────────────────────────────────
-  const doneHabits = state.habits.filter(h => h.done).length;
-  const totalHabits = state.habits.length;
-  let habitsScore = 0;
-  if (totalHabits > 0) {
-    const baseH = (doneHabits / totalHabits) * 100;
-    const allHabitsBonus = doneHabits === totalHabits ? 20 : 0;
-    const avgStreak = state.habits.length > 0
-      ? state.habits.reduce((s, h) => s + (h.streak || 0), 0) / state.habits.length
-      : 0;
-    const streakBonus = Math.min(20, (avgStreak / 7) * 20);
-    habitsScore = Math.min(100, baseH + allHabitsBonus + streakBonus);
+  if (!state.habits.length) {
+    state.habits = SEED_HABITS.map((h) => ({ id: uid(), title: h.title, emoji: h.emoji, time: h.time || '', done: !!h.done, doneDate: h.done ? today : null, streak: 0, notifyId: null }));
   }
-
-  // ── HEALTH (weight 20%) ─────────────────────────────────────────
-  const sleepMin = sleepMinutes(state.health.sleepFrom, state.health.sleepTo);
-  const sleepHas = !!(state.health.sleepFrom && state.health.sleepTo);
-  let sleepScore = sleepHas
-    ? (sleepMin < 300 ? 20 : sleepMin < 360 ? 40 : sleepMin < 420 ? 70 : sleepMin <= 540 ? 100 : 75)
-    : 0;
-  const energyScore = state.health.energy || 0;
-  const waterScore = state.health.waterGoal > 0
-    ? Math.min(100, ((state.health.water || 0) / state.health.waterGoal) * 100)
-    : 0;
-  const mealsCount = Object.values(state.health.meals || {}).filter(Boolean).length;
-  const mealScore = (mealsCount / 4) * 100;
-  const bpm = state.health.bpm || 0;
-  const bpmScore = bpm === 0 ? 0
-    : bpm >= 55 && bpm <= 75 ? 100
-    : bpm >= 75 && bpm <= 85 ? 85
-    : bpm >= 45 && bpm <= 55 ? 70
-    : 50;
-  const healthInputs = sleepHas ? [sleepScore, energyScore, waterScore, mealScore, bpmScore]
-    : [energyScore, waterScore, mealScore];
-  const healthScore = healthInputs.length > 0
-    ? healthInputs.reduce((a, b) => a + b, 0) / healthInputs.length
-    : 0;
-
-  // ── MOMENTUM (weight 15%) ───────────────────────────────────────
-  const streak = state.stats.streak || 0;
-  const streakScore = Math.min(100, streak * 8);
-  const usageDays = (state.usage.dates || []);
-  const last7 = usageDays.filter(d => {
-    const diff = (Date.now() - new Date(d).getTime()) / 86400000;
-    return diff <= 7;
-  }).length;
-  const consistencyScore = Math.min(100, (last7 / 7) * 100);
-  const pts = state.stats.pointsHistory || [];
-  let trendScore = 50;
-  if (pts.length >= 3) {
-    const recent = pts.slice(-3).map(p => p.pts);
-    if (recent[2] > recent[1] && recent[1] > recent[0]) trendScore = 100;
-    else if (recent[2] > recent[0]) trendScore = 75;
-    else if (recent[2] < recent[0]) trendScore = 25;
-  }
-  const momentumScore = (streakScore * 0.5 + consistencyScore * 0.3 + trendScore * 0.2);
-
-  // ── COMPOSITE ──────────────────────────────────────────────────
-  const weights = totalTasks > 0
-    ? { t: 0.35, h: 0.30, he: 0.20, m: 0.15 }
-    : { t: 0, h: 0.45, he: 0.30, m: 0.25 };
-  const total = Math.round(
-    tasksScore * weights.t +
-    habitsScore * weights.h +
-    healthScore * weights.he +
-    momentumScore * weights.m
-  );
-
-  // ── GRADE & INSIGHTS ───────────────────────────────────────────
-  const grade = total >= 91 ? { label: 'Dragon Mode', emoji: '🐉', color: '#a855f7' }
-    : total >= 81 ? { label: 'Excelent', emoji: '🏆', color: '#eab308' }
-    : total >= 61 ? { label: 'Productiv', emoji: '🔥', color: '#f97316' }
-    : total >= 41 ? { label: 'Activ', emoji: '⚡', color: '#3b82f6' }
-    : total >= 21 ? { label: 'In formare', emoji: '🌱', color: '#22c55e' }
-    : { label: 'Inceput', emoji: '😴', color: '#6060a0' };
-
-  const insights = [];
-  if (totalTasks > 0 && doneTasks < totalTasks) insights.push(`${totalTasks - doneTasks} task${totalTasks - doneTasks > 1 ? '-uri' : ''} neTerminate`);
-  if (totalHabits > 0 && doneHabits < totalHabits) insights.push(`${totalHabits - doneHabits} obicei${totalHabits - doneHabits > 1 ? 'uri' : ''} bifabile`);
-  if (sleepHas && sleepMin < 420) insights.push('Somn sub 7h — prioritizeaza odihna');
-  if (state.health.water > 0 && waterScore < 60) insights.push('Hidratare scazuta — mai bea apa');
-  if (streak >= 7) insights.push(`Serie de ${streak} zile — continua!`);
-  if (total >= 90) insights.push('Zi perfecta! Felicitari!');
-
-  return {
-    total,
-    grade,
-    insights,
-    components: {
-      tasks: { score: Math.round(tasksScore), done: doneTasks, total: totalTasks, label: 'Task-uri' },
-      habits: { score: Math.round(habitsScore), done: doneHabits, total: totalHabits, label: 'Obiceiuri' },
-      health: { score: Math.round(healthScore), label: 'Sanatate', details: { sleep: Math.round(sleepScore), energy: energyScore, water: Math.round(waterScore), meals: Math.round(mealScore) } },
-      momentum: { score: Math.round(momentumScore), label: 'Momentum', streak }
-    }
-  };
-}
-
-function computeProgress() {
-  const ds = computeDragonScore();
-  return {
-    overallPct: ds.total,
-    doneTasks: ds.components.tasks.done,
-    totalTasks: ds.components.tasks.total || 1,
-    tasksPct: ds.components.tasks.score,
-    productivityPct: ds.components.habits.score,
-    healthPct: ds.components.health.score
-  };
-}
-
-// ===== POINTS =====
-function addPoints(n) {
-  state.stats.points = (state.stats.points || 0) + n;
-  if (!state.stats.pointsHistory) state.stats.pointsHistory = [];
-  state.stats.pointsHistory.push({ date: todayISO(), pts: state.stats.points });
-  if (state.stats.pointsHistory.length > 30) state.stats.pointsHistory.shift();
   save();
-  toast(`+${n} puncte 🎯`);
 }
 
-// ===== ENSURE DAY RESETS =====
+/* ===== MONTHLY RESET ===== */
+function currentMonth() { return todayISO().slice(0, 7); }
+function ensureMonthlyReset() {
+  const nowMonth = currentMonth();
+  if (!state.lastMonthReset) { state.lastMonthReset = nowMonth; save(); return; }
+  if (state.lastMonthReset === nowMonth) return;
+
+  const prevMonth = state.lastMonthReset;
+  const sleepArr = state.stats.sleepHistory || [];
+  const avgSleep = sleepArr.length ? Math.round(sleepArr.reduce((a, b) => a + b, 0) / sleepArr.length) : 0;
+  const bpmArr = state.stats.bpmHistory || [];
+  const avgBpm = bpmArr.length ? Math.round(bpmArr.reduce((a, b) => a + b, 0) / bpmArr.length) : (state.health.bpm || 0);
+  const energyArr = state.stats.energyHistory || [];
+  const avgEnergy = energyArr.length ? Math.round(energyArr.reduce((a, b) => a + b, 0) / energyArr.length) : (state.health.energy || 0);
+
+  const archive = {
+    month: prevMonth,
+    tasksCompleted: state.stats.tasksCompletedTotal || 0,
+    points: state.stats.points || 0,
+    longestStreak: state.usage.longestStreak || state.stats.streak || 0,
+    activeDays: (state.usage.dates || []).filter((d) => d.startsWith(prevMonth)).length,
+    avgSleep,
+    avgBpm,
+    avgEnergy,
+    habitStreaks: state.habits.map((h) => ({ id: h.id, title: h.title, emoji: h.emoji, streak: h.streak || 0 })),
+    closedAt: new Date().toISOString(),
+  };
+  state.monthlyArchive = state.monthlyArchive || [];
+  state.monthlyArchive.unshift(archive);
+  if (state.monthlyArchive.length > 24) state.monthlyArchive.length = 24;
+
+  state.stats.tasksCompletedTotal = 0;
+  state.stats.points = 0;
+  state.stats.streak = 0;
+  state.stats.pointsHistory = [];
+  state.stats.tasksHistory = [];
+  state.stats.sleepHistory = [];
+  state.stats.bpmHistory = [];
+  state.stats.energyHistory = [];
+  state.habits.forEach((h) => { h.streak = 0; });
+  state.habitHistory = {};
+  state.usage.dates = [todayISO()];
+  state.usage.currentStreak = 1;
+  state.usage.longestStreak = 1;
+  state.lastMonthReset = nowMonth;
+  save();
+  toast(`Lună nouă: ${nowMonth}. Contoare resetate.`);
+}
+
+/* ===== DAILY RESET ===== */
+function ensureTasksDay() {
+  const today = todayISO();
+  let touched = false;
+  let doneYesterday = 0;
+  let prevDate = null;
+  state.tasks.forEach((t) => {
+    if ((t.scope || 'daily') !== 'daily') return;
+    if (t.date !== today) {
+      if (t.done) { doneYesterday++; prevDate = t.date || prevDate; }
+      t.done = false;
+      t.date = today;
+      t.notifyId = null;
+      touched = true;
+    }
+  });
+  if (touched && doneYesterday > 0 && prevDate) {
+    const hist = state.stats.tasksHistory || (state.stats.tasksHistory = []);
+    const last = hist[hist.length - 1];
+    if (!last || last.date !== prevDate) hist.push({ date: prevDate, done: doneYesterday });
+    else last.done = Math.max(last.done || 0, doneYesterday);
+    if (hist.length > 30) hist.shift();
+  }
+  if (touched) {
+    save();
+    if (state.push.enabled) {
+      state.tasks.forEach((t) => { if ((t.scope || 'daily') === 'daily' && t.time && !t.done) scheduleTaskPush(t); });
+    }
+  }
+}
 function ensureHabitsDay() {
   const today = todayISO();
-  if (!state.habitHistory) state.habitHistory = {};
-  state.habits.forEach(h => {
-    if (h.doneDate !== today) {
-      if (h.done) {
-        if (!state.habitHistory[h.id]) state.habitHistory[h.id] = [];
-        state.habitHistory[h.id].push(h.doneDate || today);
-        h.streak = (h.streak || 0) + 1;
-      }
+  let touched = false;
+  state.habits.forEach((h) => {
+    if (h.doneDate !== today && h.done) {
+      const hist = state.habitHistory[h.id] || (state.habitHistory[h.id] = []);
+      if (h.doneDate && !hist.includes(h.doneDate)) hist.push(h.doneDate);
+      if (hist.length > 90) hist.shift();
+      h.streak = (h.streak || 0) + 1;
       h.done = false;
       h.doneDate = null;
+      h.notifyId = null;
+      touched = true;
     }
   });
-  save();
-}
-
-function ensureHealthDay() {
-  const today = todayISO();
-  if (state.health.date !== today) {
-    const prev = Object.assign({}, state.health);
-    if (!state.healthHistory) state.healthHistory = [];
-    if (prev.date) state.healthHistory.push(prev);
-    if (state.healthHistory.length > 30) state.healthHistory.shift();
-    if (!state.stats.sleepHistory) state.stats.sleepHistory = [];
-    state.stats.sleepHistory.push(sleepMinutes(prev.sleepFrom, prev.sleepTo));
-    if (state.stats.sleepHistory.length > 14) state.stats.sleepHistory.shift();
-    state.health.date = today;
-    state.health.water = 0;
-    state.health.meals = { mic: false, pranz: false, gustare: false, cina: false };
-    state.health.energy = 70;
+  if (touched) {
     save();
+    if (state.push.enabled) {
+      state.habits.forEach((h) => { if (h.time && !h.done) scheduleHabitPush(h); });
+    }
   }
 }
 
-// ===== STREAK =====
-function updateStreak() {
+/* ===== HELPERS ===== */
+function tasksToday() {
   const today = todayISO();
-  if (!state.usage.dates) state.usage.dates = [];
+  return state.tasks.filter((t) => (t.scope || 'daily') === 'daily' && (!t.date || t.date === today));
+}
+function tasksLong() {
+  const today = todayISO();
+  return state.tasks
+    .filter((t) => t.scope === 'weekly' || t.scope === 'monthly')
+    .sort((a, b) => ((a.date || '') + (a.time || '')).localeCompare((b.date || '') + (b.time || '')))
+    .filter((t) => !t.date || t.date >= today || !t.done);
+}
+function daysUntil(dateISO) {
+  if (!dateISO) return null;
+  const d = new Date(dateISO + 'T00:00:00');
+  const today = new Date(todayISO() + 'T00:00:00');
+  return Math.round((d - today) / 86400000);
+}
+function longChipLabel(t) {
+  const dU = daysUntil(t.date);
+  const scope = t.scope === 'weekly' ? 'Săptămânal' : 'Lunar';
+  if (dU == null) return scope;
+  if (dU < 0) return `${scope} · întârziat`;
+  if (dU === 0) return `${scope} · azi`;
+  if (dU === 1) return `${scope} · mâine`;
+  return `${scope} · în ${dU} zile`;
+}
+function habitsDone() { return state.habits.filter((h) => h.done).length; }
+function tasksDone() { return tasksToday().filter((t) => t.done).length; }
+function progressPct() {
+  const t = tasksToday();
+  if (!t.length) return 0;
+  return Math.round((t.filter((x) => x.done).length / t.length) * 100);
+}
+function productivityPct() {
+  const tPct = progressPct();
+  const h = state.habits.length ? Math.round((habitsDone() / state.habits.length) * 100) : 0;
+  return Math.round(tPct * 0.6 + h * 0.4);
+}
+function sleepQuality() {
+  const m = sleepMinutes();
+  // 100% at 7-9h (420-540 min). Falls off linearly outside.
+  if (m >= 420 && m <= 540) return 1;
+  if (m < 420) return Math.max(0, m / 420);
+  return Math.max(0, 1 - (m - 540) / 240);
+}
+function computeEnergy() {
+  const t = tasksToday();
+  const taskPct = t.length ? (t.filter((x) => x.done).length / t.length) : 0;
+  const habitPct = state.habits.length ? (habitsDone() / state.habits.length) : 0;
+  return Math.round((sleepQuality() * 0.4 + taskPct * 0.3 + habitPct * 0.3) * 100);
+}
+function healthPct() {
+  const w = clamp((state.health.water || 0) / (state.health.waterGoal || 2500), 0, 1);
+  const sleep = sleepQuality();
+  const e = computeEnergy() / 100;
+  return Math.round(((w * 0.35) + (sleep * 0.4) + (e * 0.25)) * 100);
+}
+function pointsTotal() { return state.stats.points || 0; }
+function streakDays() { return state.stats.streak || state.usage.currentStreak || 0; }
+function sleepMinutes(from, to) {
+  from = from || state.health.sleepFrom || '23:25';
+  to = to || state.health.sleepTo || '07:00';
+  const [fh, fm] = from.split(':').map(Number);
+  const [th, tm] = to.split(':').map(Number);
+  let s = fh * 60 + fm;
+  let e = th * 60 + tm;
+  if (e <= s) e += 24 * 60;
+  return e - s;
+}
+function sleepLabel(m) {
+  m = m || sleepMinutes();
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm > 0 ? `${h}h ${mm}m` : `${h}h`;
+}
+function synthSeries(n, base, range) {
+  const arr = [];
+  let v = base;
+  for (let i = 0; i < n; i++) {
+    v += (Math.random() - 0.4) * range;
+    v = Math.max(base * 0.4, Math.min(base * 1.8, v));
+    arr.push(Math.round(v));
+  }
+  return arr;
+}
+function getSeries(key, n) {
+  n = n || 12;
+  const stat = state.stats || {};
+  const map = {
+    points:  () => stat.pointsHistory && stat.pointsHistory.length >= 2 ? stat.pointsHistory.slice(-n).map((x) => typeof x === 'object' ? Number(x.pts) || 0 : Number(x) || 0) : synthSeries(n, Math.max(30, pointsTotal() / 6 || 40), 12),
+    tasks:   () => stat.tasksHistory && stat.tasksHistory.length >= 2 ? stat.tasksHistory.slice(-n).map((x) => typeof x === 'object' ? Number(x.done) || 0 : Number(x) || 0) : synthSeries(n, 6, 3),
+    streak:  () => synthSeries(n, Math.max(3, streakDays()), 1.5),
+    sleep:   () => stat.sleepHistory && stat.sleepHistory.length >= 2 ? stat.sleepHistory.slice(-n) : synthSeries(n, 430, 25),
+    bpm:     () => stat.bpmHistory && stat.bpmHistory.length >= 2 ? stat.bpmHistory.slice(-n) : synthSeries(n, state.health.bpm || 72, 6),
+    energy:  () => stat.energyHistory && stat.energyHistory.length >= 2 ? stat.energyHistory.slice(-n) : synthSeries(n, computeEnergy() || 60, 10),
+  };
+  return (map[key] || (() => synthSeries(n, 40, 10)))();
+}
+function sparkline(data, w, h, color) {
+  w = w || 100; h = h || 28; color = color || '#6366f1';
+  let d = data && data.length >= 2 ? data.slice() : [30, 45, 35, 55, 40, 60, 50, 70, 55, 65];
+  const min = Math.min(...d), max = Math.max(...d), range = max - min || 1;
+  const step = w / (d.length - 1);
+  const pts = d.map((v, i) => [i * step, h - 4 - ((v - min) / range) * (h - 8)]);
+  const path = pts.map((p, i) => (i === 0 ? `M${p[0].toFixed(1)},${p[1].toFixed(1)}` : `L${p[0].toFixed(1)},${p[1].toFixed(1)}`)).join(' ');
+  const id = 'g' + Math.random().toString(36).slice(2, 7);
+  return `<svg viewBox="0 0 ${w} ${h}" fill="none" preserveAspectRatio="none">
+    <defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${color}" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <path d="${path} L${w},${h} L0,${h} Z" fill="url(#${id})"/>
+    <path d="${path}" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+}
+function donutRing(done, total, size) {
+  size = size || 132;
+  const pct = total > 0 ? done / total : 0;
+  const r = (size - 20) / 2;
+  const cx = size / 2, cy = size / 2;
+  const circ = 2 * Math.PI * r;
+  const dash = circ * pct;
+  const gap = circ - dash;
+  const gid = 'dg' + Math.random().toString(36).slice(2, 7);
+  return `<svg viewBox="0 0 ${size} ${size}">
+    <defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a855f7"/>
+      <stop offset="60%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient></defs>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="10"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gid})" stroke-width="10"
+      stroke-linecap="round" stroke-dasharray="${dash.toFixed(2)} ${gap.toFixed(2)}"/>
+  </svg>`;
+}
+
+/* ===== ICONS ===== */
+const IC = {
+  check:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-11"/></svg>',
+  fire:    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2s4 4 4 8a4 4 0 1 1-8 0c0-1.5.5-3 1.5-4C11 5 12 2 12 2Z"/><path d="M12 22c5 0 8-3 8-7 0-3-2-5-3-6-.5 4-3 5-3 5 0 4-3 6-3 8Z" opacity=".6"/></svg>',
+  trophy:  '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6V4Z"/><path d="M4 5h2v3a4 4 0 0 0 2 3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 5h-2v3a4 4 0 0 1-2 3.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 14h6v2H9zM8 20h8v-2H8z"/></svg>',
+  moon:    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 15A8 8 0 0 1 9 4a8 8 0 1 0 11 11Z"/></svg>',
+  sun:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/></svg>',
+  heart:   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7-4.5-9-9c-1.5-3.5 1-7 4.5-7 2 0 3.3 1 4.5 2.5C13.2 6 14.5 5 16.5 5c3.5 0 6 3.5 4.5 7-2 4.5-9 9-9 9Z"/></svg>',
+  bell:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 8H4c0-2 2-3 2-8Z"/><path d="M10 20a2 2 0 0 0 4 0"/></svg>',
+  chev:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>',
+  plus:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  target:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>',
+  cal:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+  stats:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 20V10M12 20V4M19 20v-6"/></svg>',
+  note:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h11l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"/><path d="M16 4v4h4M8 12h8M8 16h6"/></svg>',
+  doc:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M15 3v4h4M8 12h8M8 16h6M8 8h3"/></svg>',
+  bed:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18V8"/><path d="M3 12h13a4 4 0 0 1 4 4v2"/><path d="M6 12v-2h5v2"/><path d="M20 18H3"/></svg>',
+  bolt:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3 4 14h6l-1 7 9-11h-6l1-7Z"/></svg>',
+  edit:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+  trash:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>',
+  wave:    '👋',
+};
+
+/* ===== PUSH NOTIFICATIONS ===== */
+const PUSH = {
+  osReady: false,
+  osInstance: null,
+  serverOk: null,
+  apiBase: '/api',
+};
+
+async function waitForOneSignal(timeoutMs = 4000) {
+  const start = Date.now();
+  return new Promise((resolve) => {
+    const check = () => {
+      if (window.OneSignal && typeof window.OneSignal.User !== 'undefined') {
+        PUSH.osReady = true;
+        PUSH.osInstance = window.OneSignal;
+        resolve(window.OneSignal);
+      } else if (Date.now() - start > timeoutMs) {
+        resolve(null);
+      } else {
+        setTimeout(check, 200);
+      }
+    };
+    check();
+  });
+}
+
+async function checkServerPush() {
+  if (PUSH.serverOk !== null) return PUSH.serverOk;
+  try {
+    const r = await fetch(PUSH.apiBase + '?action=config', { method: 'GET' });
+    PUSH.serverOk = r.ok;
+  } catch (e) {
+    PUSH.serverOk = false;
+  }
+  state.push.serverOk = PUSH.serverOk;
+  state.push.checkedAt = Date.now();
+  save();
+  return PUSH.serverOk;
+}
+
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return 'unsupported';
+  if (Notification.permission === 'granted') return 'granted';
+  if (Notification.permission === 'denied') return 'denied';
+  try {
+    const p = await Notification.requestPermission();
+    return p;
+  } catch { return 'error'; }
+}
+
+async function enablePush() {
+  const perm = await requestNotificationPermission();
+  state.push.permission = perm;
+  state.push.enabled = perm === 'granted';
+  save();
+
+  if (perm !== 'granted') {
+    toast('Permisiune notificări refuzată.');
+    return false;
+  }
+
+  const OS = await waitForOneSignal();
+  const serverOk = await checkServerPush();
+
+  if (OS) {
+    try {
+      await OS.login(state.profile.userId);
+      await OS.User.PushSubscription.optIn();
+    } catch (e) { console.warn('OneSignal login failed', e); }
+  }
+
+  toast(serverOk ? 'Push activat pentru toate task-urile.' : 'Push local activat (offline).');
+
+  state.tasks.forEach((t) => { if (!t.done && t.date === todayISO()) scheduleTaskPush(t); });
+  state.habits.forEach((h) => { if (!h.done && h.time) scheduleHabitPush(h); });
+  save();
+  return true;
+}
+
+function nextOccurrenceISO(dateStr, timeStr) {
+  if (!timeStr) return null;
+  const [hh, mm] = timeStr.split(':').map(Number);
+  const target = new Date();
+  if (dateStr) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    target.setFullYear(y); target.setMonth(m - 1); target.setDate(d);
+  }
+  target.setHours(hh, mm, 0, 0);
+  if (target.getTime() <= Date.now() + 30000) {
+    if (!dateStr) target.setDate(target.getDate() + 1);
+    else return null;
+  }
+  return target.toISOString();
+}
+
+async function scheduleServerPush(item, title, body) {
+  if (!state.push.enabled) return null;
+  const serverOk = await checkServerPush();
+  if (!serverOk) return null;
+  const sendAt = nextOccurrenceISO(item.date, item.time);
+  if (!sendAt) return null;
+  try {
+    const r = await fetch(PUSH.apiBase + '?action=schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ externalId: state.profile.userId, title, body, sendAt }),
+    });
+    const j = await r.json();
+    return j.id || null;
+  } catch (e) {
+    console.warn('schedule failed', e);
+    return null;
+  }
+}
+
+async function cancelServerPush(notifyId) {
+  if (!notifyId) return;
+  try {
+    await fetch(PUSH.apiBase + '?action=cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: notifyId }),
+    });
+  } catch (e) { /* ignore */ }
+}
+
+async function scheduleTaskPush(task) {
+  if (!task.time || task.done) return;
+  await cancelServerPush(task.notifyId);
+  const id = await scheduleServerPush(task, `${task.emoji || '⏰'} ${task.title}`, `E ora ${task.time} — dă-i drumul!`);
+  if (id) { task.notifyId = id; save(); }
+}
+async function scheduleHabitPush(habit) {
+  if (!habit.time || habit.done) return;
+  await cancelServerPush(habit.notifyId);
+  const id = await scheduleServerPush({ time: habit.time, date: '' }, `${habit.emoji || '🎯'} ${habit.title}`, `Obicei zilnic — hai ${habit.time}!`);
+  if (id) { habit.notifyId = id; save(); }
+}
+async function cancelTaskPush(task) {
+  if (task.notifyId) { await cancelServerPush(task.notifyId); task.notifyId = null; save(); }
+}
+async function cancelHabitPush(habit) {
+  if (habit.notifyId) { await cancelServerPush(habit.notifyId); habit.notifyId = null; save(); }
+}
+
+/* Local Notification fallback: fires when app tab is open + a task/habit/sleep time == now */
+function localNotifTick() {
+  const today = todayISO();
+  if (state.localFiredDate !== today) {
+    state.localFiredDate = today; state.localFiredToday = {};
+    ensureMonthlyReset();
+    ensureTasksDay();
+    ensureHabitsDay();
+    if (state.currentTab === 'dashboard') renderScreen();
+  }
+  if (state.push.permission !== 'granted') return;
+  const now = nowTime();
+  const items = [
+    ...state.tasks.filter((t) => t.date === today && t.time === now && !t.done).map((t) => ({ key: 't:' + t.id, item: t, kind: 'task' })),
+    ...state.habits.filter((h) => h.time === now && !h.done).map((h) => ({ key: 'h:' + h.id, item: h, kind: 'habit' })),
+  ];
+  items.forEach(({ key, item, kind }) => {
+    if (state.localFiredToday[key]) return;
+    state.localFiredToday[key] = true;
+    const title = `${item.emoji || (kind === 'task' ? '⏰' : '🎯')} ${item.title}`;
+    const body = kind === 'task' ? `E ora ${item.time} — dă-i drumul!` : 'Obicei zilnic — fă-l acum';
+    fireLocalNotif(title, body, kind, item.id);
+  });
+  if (state.health.bedtimeNotify && state.health.sleepFrom === now && !state.localFiredToday['sleep:bed']) {
+    state.localFiredToday['sleep:bed'] = true;
+    fireLocalNotif('🌙 E timpul de somn', 'Închide ecranele și odihnește-te bine.', 'sleep', 'bed');
+  }
+  if (state.health.wakeNotify && state.health.sleepTo === now && !state.localFiredToday['sleep:wake']) {
+    state.localFiredToday['sleep:wake'] = true;
+    fireLocalNotif('☀️ Trezirea!', 'Bună dimineața. Începe puternic.', 'sleep', 'wake');
+  }
+  save();
+}
+async function fireLocalNotif(title, body, kind, itemId) {
+  const entry = { id: uid(), title, body, date: new Date().toISOString(), kind, itemId };
+  state.notifications.unshift(entry);
+  if (state.notifications.length > 40) state.notifications.length = 40;
+  save();
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg && reg.showNotification) {
+      reg.showNotification(title, { body, icon: 'assets/avatar.jpg', badge: 'icon.svg', tag: kind + ':' + itemId, renotify: true });
+    } else if ('Notification' in window) {
+      new Notification(title, { body, icon: 'assets/avatar.jpg' });
+    }
+  } catch (e) { /* silent */ }
+  toast(title);
+}
+
+/* ===== ROUTING ===== */
+function switchTab(name) {
+  state.currentTab = name;
+  save();
+  $$('.nav-btn').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === name));
+  renderScreen();
+}
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.nav-btn');
+  if (btn && btn.dataset.tab) switchTab(btn.dataset.tab);
+});
+
+/* ===== RENDER: DASHBOARD ===== */
+function renderDashboard() {
+  const done = habitsDone();
+  const total = state.habits.length;
+  const q = QUOTES[state.quoteIndex % QUOTES.length];
+  const pAzi = progressPct();
+  const prod = productivityPct();
+  const hp = healthPct();
+  const tToday = tasksToday();
+  const showTasks = tToday.slice(0, 5);
+  const showHabits = state.habits.slice(0, 7);
+  const bellClass = state.push.enabled ? 'hdr-bell -on' : 'hdr-bell';
+
+  return `
+    <div class="tab-view is-active" id="v-dashboard">
+      <header class="hdr">
+        <div class="hdr-avatar" style="background-image:url('${esc(state.profile.photo || 'assets/avatar.jpg')}')"></div>
+        <div class="hdr-text">
+          <h1>Bună, ${esc(state.profile.name)} <span class="wave">${IC.wave}</span></h1>
+          <p>${esc(state.profile.motto)}</p>
+        </div>
+        <button class="${bellClass}" data-act="notif" aria-label="Notificări">${IC.bell}</button>
+      </header>
+
+      <section class="stats-row">
+        <div class="stat-card">
+          <div class="stat-ico -green">${IC.check}</div>
+          <div class="stat-value">${state.stats.tasksCompletedTotal || 12}</div>
+          <div class="stat-label">Task-uri finalizate</div>
+          <div class="stat-spark">${sparkline(getSeries('tasks'), 100, 22, '#22c55e')}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-ico -orange">${IC.fire}</div>
+          <div class="stat-value">${streakDays() || 7}</div>
+          <div class="stat-label">Zile serie activă</div>
+          <div class="stat-spark">${sparkline(getSeries('streak'), 100, 22, '#f97316')}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-ico -purple">${IC.trophy}</div>
+          <div class="stat-value">${pointsTotal() || 850}</div>
+          <div class="stat-label">Puncte acumulate</div>
+          <div class="stat-spark">${sparkline(getSeries('points'), 100, 22, '#a855f7')}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-ico -blue">${IC.moon}</div>
+          <div class="stat-value">${sleepLabel()}</div>
+          <div class="stat-label">Somn mediu săptămâna asta</div>
+          <div class="stat-spark">${sparkline(getSeries('sleep'), 100, 22, '#3b82f6')}</div>
+        </div>
+      </section>
+
+      <section class="progress-card">
+        <div class="progress-top"><h3>Progres azi</h3><span class="pct">${pAzi}%</span></div>
+        <div class="progress-bar"><span style="width:${pAzi}%"></span></div>
+        <div class="progress-mini">
+          <div class="pmini">
+            <span class="pmini-ico -green">${IC.check}</span>
+            <div class="pmini-txt"><div class="pmini-v">${tasksDone()} / ${tToday.length || 0}</div><div class="pmini-l">Task-uri</div></div>
+          </div>
+          <div class="pmini">
+            <span class="pmini-ico -yellow">${IC.sun}</span>
+            <div class="pmini-txt"><div class="pmini-v">${prod}%</div><div class="pmini-l">Productivitate</div></div>
+          </div>
+          <div class="pmini">
+            <span class="pmini-ico -red">${IC.heart}</span>
+            <div class="pmini-txt"><div class="pmini-v">${hp}%</div><div class="pmini-l">Sănătate</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid-2">
+        <div class="panel -left-accent">
+          <div class="panel-hdr"><h3>Task-uri azi</h3><button data-act="goTasks">Vezi toate</button></div>
+          <div class="tlist">
+            ${showTasks.map((t) => `
+              <div class="trow ${t.done ? 'done' : ''}" data-act="toggleTask" data-id="${t.id}">
+                <span class="tcheck">${IC.check}</span>
+                <span class="ttext">${esc(t.title)} ${esc(t.emoji || '')}</span>
+                <span class="ttime">${esc(t.time || '')}</span>
+              </div>
+            `).join('') || '<div class="empty" style="padding:12px 0">Niciun task azi.</div>'}
+          </div>
+          <button class="btn-add-task" data-act="openAddTask">${IC.plus} Task nou</button>
+        </div>
+
+        <div class="panel">
+          <div class="panel-hdr"><h3>Obiceiuri</h3><button data-act="goHabits">Vezi toate</button></div>
+          <div class="habits-donut">
+            ${donutRing(done, total, 132)}
+            <div class="donut-center">
+              <b>${done}<span>&nbsp;/&nbsp;${total}</span></b>
+              <small>obiceiuri completate</small>
+            </div>
+          </div>
+          <div class="hlist">
+            ${showHabits.map((h) => `
+              <div class="hrow ${h.done ? 'done' : ''}" data-act="toggleHabit" data-id="${h.id}">
+                <span class="hico">${esc(h.emoji || '•')}</span>
+                <span class="hname">${esc(h.title)}</span>
+                <span class="hcheck">${IC.check}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </section>
+
+      <section class="health-quote">
+        <div class="health-card">
+          <div class="panel-hdr" data-act="openProtocol" style="cursor:pointer"><h3>Sănătate &amp; Odihnă</h3><span class="chev">${IC.chev}</span></div>
+          <div class="health-metrics -two">
+            <button class="hmetric-btn" data-act="openSleep" aria-label="Somn">
+              <div class="hmetric-ico" style="color:#a855f7">${IC.bed}<span style="color:#f0f2f8">${sleepLabel()}</span></div>
+              <div class="hmetric-label">Somn ${state.health.bedtimeNotify || state.health.wakeNotify ? '🔔' : ''}</div>
+              <div class="hmetric-spark">${sparkline(getSeries('sleep'), 90, 22, '#a855f7')}</div>
+            </button>
+            <button class="hmetric-btn" data-act="openEnergy" aria-label="Energie">
+              <div class="hmetric-ico" style="color:#22c55e">${IC.bolt}<span style="color:#f0f2f8">${computeEnergy()}%</span></div>
+              <div class="hmetric-label">Energie</div>
+              <div class="hmetric-spark">${sparkline(getSeries('energy'), 90, 22, '#22c55e')}</div>
+            </button>
+          </div>
+          <button class="btn-protocol" data-act="openProtocol">${IC.doc} Vezi protocolul complet</button>
+        </div>
+
+        <div class="quote-card" data-act="nextQuote">
+          <div class="quote-mark">"</div>
+          <div class="quote-text">${esc(q.text)}</div>
+          <div class="quote-author">${esc(q.author)}</div>
+        </div>
+      </section>
+
+      <section class="quick-row">
+        <div class="qtile" data-act="planZi"><span class="qtile-ico -green">${IC.target}</span><div><div class="qtile-title">Planifică</div><div class="qtile-sub">ziua</div></div></div>
+        <div class="qtile" data-act="calendar"><span class="qtile-ico -blue">${IC.cal}</span><div><div class="qtile-title">Calendar</div></div></div>
+        <div class="qtile" data-act="stats"><span class="qtile-ico -purple">${IC.stats}</span><div><div class="qtile-title">Statistici</div></div></div>
+        <div class="qtile" data-act="notes"><span class="qtile-ico -orange">${IC.note}</span><div><div class="qtile-title">Note rapide</div></div></div>
+      </section>
+
+      ${renderLongSection()}
+    </div>
+  `;
+}
+
+function renderLongSection() {
+  const list = tasksLong();
+  const wk = list.filter((t) => t.scope === 'weekly').length;
+  const mo = list.filter((t) => t.scope === 'monthly').length;
+  return `
+    <section class="panel -long" style="margin-top:6px">
+      <div class="panel-hdr">
+        <h3>Task-uri lunare &amp; săptămânale</h3>
+        <button data-act="openAddLong">${IC.plus} Nou</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <span class="chip-scope -weekly">Săptămânal · ${wk}</span>
+        <span class="chip-scope -monthly">Lunar · ${mo}</span>
+      </div>
+      <div class="tlist">
+        ${list.map((t) => `
+          <div class="trow long ${t.done ? 'done' : ''}">
+            <span class="tcheck" data-act="toggleTask" data-id="${t.id}">${IC.check}</span>
+            <div data-act="editTask" data-id="${t.id}" style="min-width:0;cursor:pointer">
+              <div class="ttext">${esc(t.title)} ${esc(t.emoji || '')}</div>
+              <div class="tsub"><span class="chip-scope -${t.scope}">${esc(longChipLabel(t))}</span>${t.notifyId ? ' <span style="color:var(--yellow)">🔔</span>' : ''}</div>
+            </div>
+            <span class="ttime">${esc(t.time || '')}</span>
+          </div>
+        `).join('') || '<div class="empty" style="padding:14px 0">Nimic în plan. Adaugă primul.</div>'}
+      </div>
+    </section>
+  `;
+}
+
+/* ===== RENDER: TASKS TAB ===== */
+function renderTasks() {
+  const list = tasksToday();
+  const upcoming = state.tasks.filter((t) => t.date && t.date > todayISO()).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  return `
+    <div class="tab-view is-active" id="v-tasks">
+      <div class="tab-title">Task-uri azi</div>
+      <div class="tab-sub">${list.filter((t) => t.done).length} din ${list.length} finalizate</div>
+      <div class="tasks-list">
+        ${list.map((t) => `
+          <div class="task-lg ${t.done ? 'done' : ''}">
+            <span class="tcheck" data-act="toggleTask" data-id="${t.id}">${IC.check}</span>
+            <div data-act="editTask" data-id="${t.id}" style="min-width:0;cursor:pointer">
+              <div class="ttext">${esc(t.title)} ${esc(t.emoji || '')}</div>
+              <div class="ttime" style="font-size:11px;color:var(--text-mute)">${esc(t.time || '')}${t.notifyId ? ' · 🔔' : ''}</div>
+            </div>
+            <button style="color:var(--text-mute);padding:6px" data-act="delTask" data-id="${t.id}" aria-label="Șterge">${IC.trash}</button>
+          </div>
+        `).join('') || '<div class="empty">Niciun task azi. Adaugă unul cu butonul +.</div>'}
+      </div>
+      ${upcoming.length ? `<div class="tab-title" style="font-size:16px;margin-top:22px">Următoarele zile</div>
+        <div class="tasks-list">
+          ${upcoming.slice(0, 10).map((t) => `
+            <div class="task-lg" data-act="editTask" data-id="${t.id}">
+              <span class="tcheck">${IC.check}</span>
+              <div><div class="ttext">${esc(t.title)} ${esc(t.emoji || '')}</div>
+                <div class="ttime" style="font-size:11px;color:var(--text-mute)">${esc(t.date)} · ${esc(t.time || '')}</div>
+              </div>
+              <span class="chev" style="color:var(--text-mute)">${IC.chev}</span>
+            </div>
+          `).join('')}
+        </div>` : ''}
+      <button class="btn-add-task" style="margin-top:14px" data-act="openAddTask">${IC.plus} Task nou</button>
+    </div>
+  `;
+}
+
+/* ===== RENDER: HABITS TAB ===== */
+function renderHabits() {
+  return `
+    <div class="tab-view is-active" id="v-habits">
+      <div class="tab-title">Obiceiuri</div>
+      <div class="tab-sub">${habitsDone()} din ${state.habits.length} completate azi</div>
+      <div class="habits-full">
+        ${state.habits.map((h) => `
+          <div class="habit-lg ${h.done ? 'done' : ''}">
+            <span class="hico" data-act="toggleHabit" data-id="${h.id}" style="cursor:pointer">${esc(h.emoji || '•')}</span>
+            <div data-act="editHabit" data-id="${h.id}" style="cursor:pointer;min-width:0">
+              <div class="hname">${esc(h.title)}</div>
+              <div class="hsub">${h.time ? `${esc(h.time)} · ` : ''}${h.streak ? `${h.streak} zile serie` : 'Zero serie'}${h.notifyId ? ' · 🔔' : ''}</div>
+            </div>
+            <span class="hcheck" data-act="toggleHabit" data-id="${h.id}" style="cursor:pointer">${IC.check}</span>
+          </div>
+        `).join('')}
+      </div>
+      <button class="btn-add-task" style="margin-top:16px" data-act="openAddHabit">${IC.plus} Obicei nou</button>
+    </div>
+  `;
+}
+
+/* ===== RENDER: PROFILE TAB ===== */
+function renderProfile() {
+  const p = state.push;
+  const pushLabel = !('Notification' in window) ? 'Neacceptat de browser'
+    : p.enabled ? 'Push activ ✓'
+    : p.permission === 'denied' ? 'Blocat — schimbă în setările browserului'
+    : 'Activează push-ul';
+  const pushBtnColor = p.enabled ? 'var(--green)' : (p.permission === 'denied' ? 'var(--red)' : 'var(--blue)');
+
+  return `
+    <div class="tab-view is-active" id="v-profile">
+      <div class="profile-hero">
+        <div class="hdr-avatar" style="background-image:url('${esc(state.profile.photo || 'assets/avatar.jpg')}')"></div>
+        <h2>${esc(state.profile.name)}</h2>
+        <p>${esc(state.profile.motto)}</p>
+      </div>
+      <div class="profile-stats">
+        <div class="pstat"><b>${state.stats.tasksCompletedTotal || 12}</b><span>Task-uri</span></div>
+        <div class="pstat"><b>${streakDays() || 7}</b><span>Zile serie</span></div>
+        <div class="pstat"><b>${pointsTotal() || 850}</b><span>Puncte</span></div>
+      </div>
+      <div class="profile-list">
+        <div class="plist-row" data-act="togglePush">
+          <div class="plist-ico" style="color:${pushBtnColor}">${IC.bell}</div>
+          <div class="plist-txt">${pushLabel}</div>
+          <div class="plist-chev">${IC.chev}</div>
+        </div>
+        <div class="plist-row" data-act="editProfile">
+          <div class="plist-ico">${IC.edit}</div>
+          <div class="plist-txt">Editează profil</div>
+          <div class="plist-chev">${IC.chev}</div>
+        </div>
+        <div class="plist-row" data-act="openProtocol">
+          <div class="plist-ico">${IC.doc}</div>
+          <div class="plist-txt">Protocol Sănătate</div>
+          <div class="plist-chev">${IC.chev}</div>
+        </div>
+        <div class="plist-row" data-act="stats">
+          <div class="plist-ico">${IC.stats}</div>
+          <div class="plist-txt">Statistici</div>
+          <div class="plist-chev">${IC.chev}</div>
+        </div>
+        <div class="plist-row" data-act="notes">
+          <div class="plist-ico">${IC.note}</div>
+          <div class="plist-txt">Note rapide</div>
+          <div class="plist-chev">${IC.chev}</div>
+        </div>
+        <div class="plist-row" data-act="testPush">
+          <div class="plist-ico" style="color:var(--purple)">${IC.bell}</div>
+          <div class="plist-txt">Test notificare (acum)</div>
+          <div class="plist-chev">${IC.chev}</div>
+        </div>
+        <div class="plist-row" data-act="resetData">
+          <div class="plist-ico" style="color:var(--red)">${IC.trash}</div>
+          <div class="plist-txt" style="color:var(--red)">Resetează datele</div>
+          <div class="plist-chev">${IC.chev}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/* ===== SCREEN RENDER ===== */
+function renderScreen() {
+  const screen = $('#screen');
+  const tab = state.currentTab || 'dashboard';
+  let html = '';
+  if (tab === 'dashboard') html = renderDashboard();
+  else if (tab === 'tasks') html = renderTasks();
+  else if (tab === 'habits') html = renderHabits();
+  else if (tab === 'profile') html = renderProfile();
+  else html = renderDashboard();
+  screen.innerHTML = html;
+  window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+}
+
+/* ===== ACTIONS ===== */
+function toast(msg) {
+  const root = $('#toastRoot');
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  root.appendChild(el);
+  setTimeout(() => el.remove(), 2800);
+}
+async function toggleTask(id) {
+  const t = state.tasks.find((x) => x.id === id);
+  if (!t) return;
+  t.done = !t.done;
+  if (t.done) { addPoints(10); await cancelTaskPush(t); flashPoints('+10'); }
+  else { state.stats.points = Math.max(0, (state.stats.points || 0) - 10); await scheduleTaskPush(t); }
+  bumpTasksHistory();
+  save();
+  patchAfterToggle('task', t);
+}
+async function toggleHabit(id) {
+  const h = state.habits.find((x) => x.id === id);
+  if (!h) return;
+  h.done = !h.done;
+  h.doneDate = h.done ? todayISO() : null;
+  if (h.done) { h.streak = (h.streak || 0) + 1; addPoints(5); await cancelHabitPush(h); flashPoints('+5'); }
+  else { h.streak = Math.max(0, (h.streak || 0) - 1); await scheduleHabitPush(h); }
+  save();
+  patchAfterToggle('habit', h);
+}
+
+/* Update DOM in place without full re-render — smooth transitions */
+function patchAfterToggle(kind, item) {
+  const tab = state.currentTab || 'dashboard';
+
+  document.querySelectorAll(`[data-id="${item.id}"]`).forEach((el) => {
+    const row = el.closest('.trow, .hrow, .task-lg, .habit-lg');
+    if (row) row.classList.toggle('done', !!item.done);
+  });
+
+  if (tab === 'dashboard') {
+    const pAzi = progressPct();
+    const bar = document.querySelector('.progress-bar > span');
+    if (bar) bar.style.width = pAzi + '%';
+    const pctEl = document.querySelector('.progress-top .pct');
+    if (pctEl) pctEl.textContent = pAzi + '%';
+
+    const tToday = tasksToday();
+    const miniVals = document.querySelectorAll('.progress-mini .pmini-v');
+    if (miniVals[0]) miniVals[0].textContent = `${tasksDone()} / ${tToday.length || 0}`;
+    if (miniVals[1]) miniVals[1].textContent = productivityPct() + '%';
+    if (miniVals[2]) miniVals[2].textContent = healthPct() + '%';
+
+    const statValues = document.querySelectorAll('.stats-row .stat-value');
+    if (statValues[0]) statValues[0].textContent = state.stats.tasksCompletedTotal || 12;
+    if (statValues[2]) statValues[2].textContent = pointsTotal() || 850;
+
+    const energyBtn = document.querySelector('[data-act="openEnergy"] .hmetric-ico span');
+    if (energyBtn) energyBtn.textContent = computeEnergy() + '%';
+
+    const donut = document.querySelector('.habits-donut');
+    if (donut) {
+      const done = habitsDone();
+      const total = state.habits.length;
+      const active = donut.querySelector('svg circle:nth-of-type(2)');
+      if (active) {
+        const r = Number(active.getAttribute('r'));
+        const circ = 2 * Math.PI * r;
+        const dash = circ * (total > 0 ? done / total : 0);
+        const gap = circ - dash;
+        active.style.transition = 'stroke-dasharray 600ms cubic-bezier(0.4, 0, 0.2, 1)';
+        active.setAttribute('stroke-dasharray', `${dash.toFixed(2)} ${gap.toFixed(2)}`);
+      }
+      const bText = donut.querySelector('.donut-center b');
+      if (bText) bText.innerHTML = `${done}<span>&nbsp;/&nbsp;${total}</span>`;
+    }
+
+    if (item.scope === 'weekly' || item.scope === 'monthly') {
+      const list = tasksLong();
+      const wk = list.filter((t) => t.scope === 'weekly').length;
+      const mo = list.filter((t) => t.scope === 'monthly').length;
+      const chips = document.querySelectorAll('.panel.-long .chip-scope');
+      if (chips[0]) chips[0].textContent = `Săptămânal · ${wk}`;
+      if (chips[1]) chips[1].textContent = `Lunar · ${mo}`;
+    }
+  } else if (tab === 'tasks') {
+    const list = tasksToday();
+    const sub = document.querySelector('#v-tasks .tab-sub');
+    if (sub) sub.textContent = `${list.filter((t) => t.done).length} din ${list.length} finalizate`;
+  } else if (tab === 'habits') {
+    const sub = document.querySelector('#v-habits .tab-sub');
+    if (sub) sub.textContent = `${habitsDone()} din ${state.habits.length} completate azi`;
+    const streakSub = document.querySelector(`.habit-lg [data-act="editHabit"][data-id="${item.id}"] .hsub`);
+    if (streakSub) {
+      streakSub.textContent = `${item.time ? item.time + ' · ' : ''}${item.streak ? item.streak + ' zile serie' : 'Zero serie'}${item.notifyId ? ' · 🔔' : ''}`;
+    }
+  }
+}
+
+function flashPoints(text) {
+  const card = document.querySelectorAll('.stats-row .stat-card')[2];
+  if (!card) return;
+  const flash = document.createElement('div');
+  flash.className = 'points-flash';
+  flash.textContent = text;
+  card.appendChild(flash);
+  setTimeout(() => flash.remove(), 1200);
+}
+async function delTask(id) {
+  const t = state.tasks.find((x) => x.id === id);
+  if (t) await cancelTaskPush(t);
+  state.tasks = state.tasks.filter((t) => t.id !== id);
+  save();
+  renderScreen();
+}
+function addPoints(n) {
+  state.stats.points = (state.stats.points || 0) + n;
+  const today = todayISO();
+  const hist = state.stats.pointsHistory || (state.stats.pointsHistory = []);
+  const last = hist[hist.length - 1];
+  if (last && last.date === today) last.pts = state.stats.points;
+  else hist.push({ date: today, pts: state.stats.points });
+  if (hist.length > 14) hist.shift();
+  state.stats.tasksCompletedTotal = (state.stats.tasksCompletedTotal || 0) + (n >= 10 ? 1 : 0);
+}
+function bumpTasksHistory() {
+  const today = todayISO();
+  const done = tasksDone();
+  const hist = state.stats.tasksHistory || (state.stats.tasksHistory = []);
+  const last = hist[hist.length - 1];
+  if (last && last.date === today) last.done = done;
+  else hist.push({ date: today, done });
+  if (hist.length > 14) hist.shift();
+}
+
+/* ===== MODAL ===== */
+function closeModal() { $('#modalRoot').innerHTML = ''; }
+function openModal(html) {
+  $('#modalRoot').innerHTML = `<div class="modal-backdrop" data-close-modal>
+    <div class="modal" onclick="event.stopPropagation()">${html}</div>
+  </div>`;
+}
+document.addEventListener('click', (e) => {
+  if (e.target.matches('[data-close-modal]')) closeModal();
+});
+
+function openAddTaskModal(editId, defaultScope) {
+  const editing = editId ? state.tasks.find((t) => t.id === editId) : null;
+  const emojis = ['💪','📖','💼','🥗','📱','🎯','🧘','☕','🏃','💧','🧠','✏️','🌙','🚫','⏰','📝','🏋️','🩺','💰','🎓'];
+  const cur = editing || { title: '', emoji: '🎯', time: '', date: todayISO(), scope: defaultScope || 'daily' };
+  const scope = cur.scope || 'daily';
+  openModal(`
+    <h3>${editing ? 'Editează task' : (scope === 'daily' ? 'Task nou' : (scope === 'weekly' ? 'Task săptămânal' : 'Task lunar'))}</h3>
+    <div class="fld"><label>Titlu</label><input id="mTitle" type="text" placeholder="ex: Antrenament dimineață" value="${esc(cur.title)}"/></div>
+    <div class="fld"><label>Emoji</label>
+      <div class="emoji-picker" id="mEmojis">
+        ${emojis.map((e) => `<button type="button" data-emoji="${e}" class="${e === cur.emoji ? 'sel' : ''}">${e}</button>`).join('')}
+      </div>
+    </div>
+    <div class="fld"><label>Scop</label>
+      <div class="emoji-picker" id="mScopes">
+        <button type="button" data-scope="daily"   class="${scope==='daily'?'sel':''}"   style="width:auto;padding:8px 14px;font-size:12px">📅 Zilnic</button>
+        <button type="button" data-scope="weekly"  class="${scope==='weekly'?'sel':''}"  style="width:auto;padding:8px 14px;font-size:12px">🗓️ Săptămânal</button>
+        <button type="button" data-scope="monthly" class="${scope==='monthly'?'sel':''}" style="width:auto;padding:8px 14px;font-size:12px">📆 Lunar</button>
+      </div>
+    </div>
+    <div class="fld" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>Ora</label><input id="mTime" type="time" value="${esc(cur.time || '08:00')}"/></div>
+      <div><label>${scope === 'daily' ? 'Data' : 'Deadline'}</label><input id="mDate" type="date" value="${esc(cur.date || todayISO())}"/></div>
+    </div>
+    <div class="btn-row">
+      ${editing ? `<button class="btn -danger" id="mDel">Șterge</button>` : ''}
+      <button class="btn -ghost" data-close-modal>Anulează</button>
+      <button class="btn -primary" id="mSave">${editing ? 'Salvează' : 'Adaugă'}</button>
+    </div>
+  `);
+  let selEmoji = cur.emoji;
+  let selScope = scope;
+  $$('#mEmojis button').forEach((b) => b.addEventListener('click', () => {
+    selEmoji = b.dataset.emoji;
+    $$('#mEmojis button').forEach((x) => x.classList.toggle('sel', x === b));
+  }));
+  $$('#mScopes button').forEach((b) => b.addEventListener('click', () => {
+    selScope = b.dataset.scope;
+    $$('#mScopes button').forEach((x) => x.classList.toggle('sel', x === b));
+  }));
+  $('#mSave').addEventListener('click', async () => {
+    const title = $('#mTitle').value.trim();
+    if (!title) { toast('Adaugă un titlu.'); return; }
+    const time = $('#mTime').value || '';
+    const date = $('#mDate').value || todayISO();
+    let target;
+    if (editing) {
+      target = editing;
+      await cancelTaskPush(editing);
+      editing.title = title; editing.emoji = selEmoji; editing.time = time; editing.date = date; editing.scope = selScope;
+    } else {
+      target = { id: uid(), title, emoji: selEmoji, date, time, done: false, chip: null, notifyId: null, scope: selScope };
+      state.tasks.push(target);
+    }
+    save();
+    if (!target.done && target.time) await scheduleTaskPush(target);
+    closeModal();
+    renderScreen();
+    toast(editing ? 'Task actualizat.' : (selScope === 'daily' ? 'Task adăugat.' : 'Adăugat în plan.'));
+  });
+  if (editing) $('#mDel').addEventListener('click', async () => { await delTask(editing.id); closeModal(); toast('Task șters.'); });
+}
+
+function openAddHabitModal(editId) {
+  const editing = editId ? state.habits.find((h) => h.id === editId) : null;
+  const emojis = ['💧','🧘','📖','🌙','🚫','✏️','🧠','🏃','☕','🥗','😴','🎧','💪','🎯','⏰'];
+  const cur = editing || { title: '', emoji: '💧', time: '' };
+  openModal(`
+    <h3>${editing ? 'Editează obicei' : 'Obicei nou'}</h3>
+    <div class="fld"><label>Nume</label><input id="mTitle" type="text" placeholder="ex: Hidratare" value="${esc(cur.title)}"/></div>
+    <div class="fld"><label>Emoji</label>
+      <div class="emoji-picker" id="mEmojis">
+        ${emojis.map((e) => `<button type="button" data-emoji="${e}" class="${e === cur.emoji ? 'sel' : ''}">${e}</button>`).join('')}
+      </div>
+    </div>
+    <div class="fld"><label>Ora reamintirii (opțional)</label><input id="mTime" type="time" value="${esc(cur.time || '')}"/></div>
+    <div class="btn-row">
+      ${editing ? `<button class="btn -danger" id="mDel">Șterge</button>` : ''}
+      <button class="btn -ghost" data-close-modal>Anulează</button>
+      <button class="btn -primary" id="mSave">${editing ? 'Salvează' : 'Adaugă'}</button>
+    </div>
+  `);
+  let selEmoji = cur.emoji;
+  $$('#mEmojis button').forEach((b) => b.addEventListener('click', () => {
+    selEmoji = b.dataset.emoji;
+    $$('#mEmojis button').forEach((x) => x.classList.toggle('sel', x === b));
+  }));
+  $('#mSave').addEventListener('click', async () => {
+    const title = $('#mTitle').value.trim();
+    if (!title) { toast('Adaugă un nume.'); return; }
+    const time = $('#mTime').value || '';
+    let target;
+    if (editing) {
+      target = editing;
+      await cancelHabitPush(editing);
+      editing.title = title; editing.emoji = selEmoji; editing.time = time;
+    } else {
+      target = { id: uid(), title, emoji: selEmoji, time, done: false, doneDate: null, streak: 0, notifyId: null };
+      state.habits.push(target);
+    }
+    save();
+    if (target.time && !target.done) await scheduleHabitPush(target);
+    closeModal(); renderScreen();
+    toast(editing ? 'Obicei actualizat.' : 'Obicei adăugat.');
+  });
+  if (editing) $('#mDel').addEventListener('click', async () => {
+    await cancelHabitPush(editing);
+    state.habits = state.habits.filter((h) => h.id !== editing.id);
+    save(); closeModal(); renderScreen(); toast('Obicei șters.');
+  });
+}
+
+function openProtocolModal() {
+  const m = sleepMinutes();
+  openModal(`
+    <h3>Protocol Sănătate</h3>
+    <p style="color:var(--text-dim);font-size:13px;margin:0 0 14px">Câteva reguli simple, verificate.</p>
+    <div class="fld" style="padding:12px;background:rgba(255,255,255,0.04);border-radius:12px">
+      <b>Somn:</b> ${sleepLabel(m)} (țintă 7-9h)<br>
+      <b>Hidratare:</b> ${state.health.water || 0} / ${state.health.waterGoal} ml<br>
+      <b>Energie:</b> ${state.health.energy}%
+    </div>
+    <div class="btn-row">
+      <button class="btn -ghost" data-close-modal>Închide</button>
+      <button class="btn -primary" id="mEdit">Editează</button>
+    </div>
+  `);
+  $('#mEdit').addEventListener('click', () => { closeModal(); openHealthEditModal(); });
+}
+function openHealthEditModal() {
+  openModal(`
+    <h3>Sănătate & odihnă</h3>
+    <div class="fld"><label>Hidratare (ml azi)</label><input id="mW" type="number" value="${state.health.water || 0}"/></div>
+    <div class="fld"><label>Țintă hidratare (ml)</label><input id="mWg" type="number" value="${state.health.waterGoal || 2500}"/></div>
+    <div class="btn-row">
+      <button class="btn -ghost" data-close-modal>Anulează</button>
+      <button class="btn -primary" id="mSave">Salvează</button>
+    </div>
+  `);
+  $('#mSave').addEventListener('click', () => {
+    state.health.water = Number($('#mW').value) || 0;
+    state.health.waterGoal = Number($('#mWg').value) || 2500;
+    save(); closeModal(); renderScreen(); toast('Actualizat.');
+  });
+}
+
+function openEnergyModal() {
+  const e = computeEnergy();
+  const t = tasksToday();
+  const sq = Math.round(sleepQuality() * 100);
+  const tp = t.length ? Math.round((t.filter((x) => x.done).length / t.length) * 100) : 0;
+  const hp = state.habits.length ? Math.round((habitsDone() / state.habits.length) * 100) : 0;
+  const bar = (label, value, color) => `
+    <div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span>${label}</span><span style="color:${color};font-weight:700">${value}%</span></div>
+      <div style="height:8px;background:rgba(255,255,255,0.06);border-radius:999px;overflow:hidden"><div style="height:100%;width:${value}%;background:${color};border-radius:999px;transition:width 700ms cubic-bezier(0.22,0.9,0.24,1)"></div></div>
+    </div>`;
+  openModal(`
+    <h3>Energie — ${e}%</h3>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px">Auto-calculată din somn, task-uri și obiceiuri.</div>
+    ${bar('🌙 Calitate somn (40%)', sq, '#a855f7')}
+    ${bar('✅ Task-uri azi (30%)', tp, '#22c55e')}
+    ${bar('🎯 Obiceiuri azi (30%)', hp, '#3b82f6')}
+    <div style="padding:12px;background:rgba(255,255,255,0.04);border-radius:10px;font-size:12px;color:var(--text-dim);margin-top:6px">
+      Crește energia dormind 7-9h, bifând task-uri și menținând obiceiurile.
+    </div>
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn -primary" data-close-modal>Am înțeles</button>
+    </div>
+  `);
+}
+
+async function openSleepModal() {
+  const m = sleepMinutes();
+  const arr = state.stats.sleepHistory || [];
+  const avgMin = arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : m;
+  const hoursGood = m >= 420 && m <= 540;
+  openModal(`
+    <h3>Somn</h3>
+    <div style="padding:14px;background:rgba(168,85,247,0.08);border:1px solid rgba(168,85,247,0.25);border-radius:14px;margin-bottom:14px">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px">
+        <b style="font-size:24px;color:${hoursGood ? 'var(--green)' : 'var(--yellow)'}">${sleepLabel(m)}</b>
+        <span style="font-size:11px;color:var(--text-dim)">Aseară</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-dim)">${state.health.sleepFrom} → ${state.health.sleepTo} · ${hoursGood ? '✓ în interval optim' : '⚠ recomandat 7-9h'}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      <div class="pstat"><b>${sleepLabel(avgMin)}</b><span>Somn mediu</span></div>
+      <div class="pstat"><b>${arr.length}</b><span>Zile înregistrate</span></div>
+    </div>
+    <div style="background:rgba(255,255,255,0.04);border-radius:12px;padding:12px;margin-bottom:16px">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Istoric somn (ultimele zile)</div>
+      ${sparkline(getSeries('sleep', 20), 320, 60, '#a855f7')}
+    </div>
+
+    <h3 style="font-size:15px;margin:6px 0 10px">Ore culcare & trezire</h3>
+    <div class="fld" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><label>🌙 Culcare</label><input id="mSf" type="time" value="${esc(state.health.sleepFrom || '23:25')}"/></div>
+      <div><label>☀️ Trezire</label><input id="mSt" type="time" value="${esc(state.health.sleepTo || '07:00')}"/></div>
+    </div>
+
+    <h3 style="font-size:15px;margin:14px 0 10px">Notificări push</h3>
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:16px">
+      <label style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:rgba(255,255,255,0.04);border-radius:12px;cursor:pointer">
+        <span>🌙 Reamintește-mi să merg la culcare</span>
+        <input type="checkbox" id="mBed" ${state.health.bedtimeNotify ? 'checked' : ''}/>
+      </label>
+      <label style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:rgba(255,255,255,0.04);border-radius:12px;cursor:pointer">
+        <span>☀️ Reamintește-mi să mă trezesc</span>
+        <input type="checkbox" id="mWake" ${state.health.wakeNotify ? 'checked' : ''}/>
+      </label>
+    </div>
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:14px">Vei primi push în fiecare zi la ora setată.${!state.push.enabled ? ' <b style="color:var(--yellow)">Push global inactiv</b> — activează-l din clopoțel.' : ''}</div>
+
+    <div class="btn-row">
+      <button class="btn -ghost" data-close-modal>Anulează</button>
+      <button class="btn -primary" id="mSave">Salvează</button>
+    </div>
+  `);
+  $('#mSave').addEventListener('click', async () => {
+    state.health.sleepFrom = $('#mSf').value || state.health.sleepFrom;
+    state.health.sleepTo = $('#mSt').value || state.health.sleepTo;
+    state.health.bedtimeNotify = !!$('#mBed').checked;
+    state.health.wakeNotify = !!$('#mWake').checked;
+    save();
+    await syncSleepPush();
+    closeModal();
+    renderScreen();
+    toast('Setări somn actualizate.');
+  });
+}
+
+async function syncSleepPush() {
+  if (state.health.bedtimeNotifyId) { await cancelServerPush(state.health.bedtimeNotifyId); state.health.bedtimeNotifyId = null; }
+  if (state.health.wakeNotifyId) { await cancelServerPush(state.health.wakeNotifyId); state.health.wakeNotifyId = null; }
+  if (!state.push.enabled) { save(); return; }
+  if (state.health.bedtimeNotify) {
+    const id = await scheduleServerPush({ time: state.health.sleepFrom, date: '' }, '🌙 E timpul de somn', 'Închide ecranele și odihnește-te bine.');
+    if (id) state.health.bedtimeNotifyId = id;
+  }
+  if (state.health.wakeNotify) {
+    const id = await scheduleServerPush({ time: state.health.sleepTo, date: '' }, '☀️ Trezirea!', 'Bună dimineața. Începe puternic.');
+    if (id) state.health.wakeNotifyId = id;
+  }
+  save();
+}
+function openProfileEditModal() {
+  openModal(`
+    <h3>Profil</h3>
+    <div class="fld"><label>Nume</label><input id="mName" type="text" value="${esc(state.profile.name)}"/></div>
+    <div class="fld"><label>Motto</label><textarea id="mMotto" rows="3">${esc(state.profile.motto)}</textarea></div>
+    <div class="fld"><label>Poză (URL sau lasă avatarul default)</label><input id="mPhoto" type="text" value="${esc(state.profile.photo || 'assets/avatar.jpg')}"/></div>
+    <div class="btn-row">
+      <button class="btn -ghost" data-close-modal>Anulează</button>
+      <button class="btn -primary" id="mSave">Salvează</button>
+    </div>
+  `);
+  $('#mSave').addEventListener('click', () => {
+    state.profile.name = $('#mName').value.trim() || state.profile.name;
+    state.profile.motto = $('#mMotto').value.trim() || state.profile.motto;
+    state.profile.photo = $('#mPhoto').value.trim() || 'assets/avatar.jpg';
+    save(); closeModal(); renderScreen(); toast('Profil actualizat.');
+  });
+}
+
+function openNotifModal() {
+  const p = state.push;
+  const status = !('Notification' in window) ? 'Browser-ul nu acceptă notificări.'
+    : p.enabled ? '✓ Push activ. Vei primi notificări la ora fiecărui task/obicei.'
+    : p.permission === 'denied' ? '✗ Blocat. Deschide setările browserului să activezi.'
+    : 'Push încă neactivat. Apasă butonul de mai jos.';
+  const btn = p.enabled
+    ? `<button class="btn -ghost" id="mOff">Dezactivează</button>`
+    : `<button class="btn -primary" id="mOn">Activează push</button>`;
+  const list = state.notifications.slice(0, 10);
+  openModal(`
+    <h3>Notificări</h3>
+    <div style="padding:10px 12px;background:rgba(255,255,255,0.04);border-radius:10px;font-size:13px;margin-bottom:14px">
+      ${status}<br>
+      <small style="color:var(--text-dim)">Server push: ${p.serverOk === true ? 'ok' : p.serverOk === false ? 'indisponibil (local doar)' : 'necunoscut'}</small>
+    </div>
+    <div class="btn-row" style="margin-bottom:14px">
+      ${btn}
+      <button class="btn -ghost" data-close-modal>Închide</button>
+    </div>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Ultimele notificări</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      ${list.map((n) => `<div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:10px 12px;font-size:13px">
+        <b>${esc(n.title)}</b><br>
+        <span style="color:var(--text-dim);font-size:11px">${esc(n.body || '')}</span><br>
+        <span style="color:var(--text-mute);font-size:10px">${new Date(n.date).toLocaleString('ro-RO')}</span>
+      </div>`).join('') || '<div class="empty" style="padding:20px 0">Nicio notificare încă.</div>'}
+    </div>
+  `);
+  $('#mOn')?.addEventListener('click', async () => { await enablePush(); closeModal(); renderScreen(); });
+  $('#mOff')?.addEventListener('click', async () => {
+    state.push.enabled = false; save();
+    for (const t of state.tasks) await cancelTaskPush(t);
+    for (const h of state.habits) await cancelHabitPush(h);
+    toast('Push dezactivat.');
+    closeModal(); renderScreen();
+  });
+}
+
+function openStatsModal() {
+  const arch = state.monthlyArchive || [];
+  const monthLabel = (m) => {
+    const [y, mo] = m.split('-').map(Number);
+    return new Date(y, mo - 1, 1).toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
+  };
+  openModal(`
+    <h3>Statistici</h3>
+    <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">Luna curentă: ${monthLabel(state.lastMonthReset || currentMonth())}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0 16px">
+      <div class="pstat"><b>${state.stats.tasksCompletedTotal || 0}</b><span>Task-uri luna asta</span></div>
+      <div class="pstat"><b>${streakDays()}</b><span>Zile serie</span></div>
+      <div class="pstat"><b>${pointsTotal()}</b><span>Puncte</span></div>
+      <div class="pstat"><b>${state.habits.length}</b><span>Obiceiuri</span></div>
+      <div class="pstat"><b>${state.usage.longestStreak || 0}</b><span>Cea mai lungă serie</span></div>
+      <div class="pstat"><b>${(state.usage.dates || []).length}</b><span>Zile active</span></div>
+    </div>
+    <div style="background:rgba(255,255,255,0.04);border-radius:12px;padding:12px;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Puncte în timp</div>
+      ${sparkline(getSeries('points', 20), 320, 60, '#a855f7')}
+    </div>
+    <div style="background:rgba(255,255,255,0.04);border-radius:12px;padding:12px;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Task-uri făcute / zi</div>
+      ${sparkline(getSeries('tasks', 20), 320, 60, '#22c55e')}
+    </div>
+    <div style="background:rgba(255,255,255,0.04);border-radius:12px;padding:12px;margin-bottom:12px">
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px">Somn</div>
+      ${sparkline(getSeries('sleep', 20), 320, 60, '#3b82f6')}
+    </div>
+    ${arch.length ? `<h3 style="margin:18px 0 10px;font-size:15px">Luni anterioare</h3>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      ${arch.map((a) => `
+        <div style="background:rgba(255,255,255,0.04);border-radius:12px;padding:12px">
+          <div style="font-weight:700;text-transform:capitalize;margin-bottom:6px">${esc(monthLabel(a.month))}</div>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:12px">
+            <div><b style="font-size:15px">${a.tasksCompleted}</b><br><span style="color:var(--text-dim)">Task-uri</span></div>
+            <div><b style="font-size:15px">${a.points}</b><br><span style="color:var(--text-dim)">Puncte</span></div>
+            <div><b style="font-size:15px">${a.activeDays}</b><br><span style="color:var(--text-dim)">Zile active</span></div>
+            <div><b style="font-size:15px">${a.longestStreak}</b><br><span style="color:var(--text-dim)">Serie max</span></div>
+            <div><b style="font-size:15px">${a.avgSleep ? sleepLabel(a.avgSleep) : '—'}</b><br><span style="color:var(--text-dim)">Somn mediu</span></div>
+            <div><b style="font-size:15px">${a.avgEnergy || '—'}${a.avgEnergy ? '%' : ''}</b><br><span style="color:var(--text-dim)">Energie</span></div>
+          </div>
+        </div>
+      `).join('')}
+    </div>` : ''}
+    <div class="btn-row" style="margin-top:14px"><button class="btn -primary" data-close-modal>Închide</button></div>
+  `);
+}
+
+function openNotesModal() {
+  const list = (state.notes || []).slice(-10).reverse();
+  openModal(`
+    <h3>Note rapide</h3>
+    <div class="fld"><textarea id="mNote" rows="3" placeholder="Scrie o notă rapidă..."></textarea></div>
+    <div class="btn-row">
+      <button class="btn -ghost" data-close-modal>Închide</button>
+      <button class="btn -primary" id="mSave">Adaugă</button>
+    </div>
+    <div style="margin-top:16px;display:flex;flex-direction:column;gap:8px">
+      ${list.map((n) => `<div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:10px 12px;font-size:13px">${esc(n.text)}<div style="font-size:10px;color:var(--text-dim);margin-top:2px">${esc(n.date)}</div></div>`).join('') || '<div class="empty">Nicio notă încă.</div>'}
+    </div>
+  `);
+  $('#mSave').addEventListener('click', () => {
+    const text = $('#mNote').value.trim();
+    if (!text) return;
+    state.notes.push({ id: uid(), text, date: todayISO() });
+    save(); closeModal(); toast('Notă adăugată.');
+  });
+}
+
+function openCalendarModal() {
+  const days = [];
+  const start = new Date();
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    const iso = d.toISOString().slice(0, 10);
+    days.push({
+      iso,
+      label: d.toLocaleDateString('ro-RO', { weekday: 'short', day: '2-digit', month: 'short' }),
+      tasks: state.tasks.filter((t) => t.date === iso).sort((a, b) => (a.time || '').localeCompare(b.time || '')),
+    });
+  }
+  openModal(`
+    <h3>Calendar — următoarele 7 zile</h3>
+    <div style="display:flex;flex-direction:column;gap:12px;max-height:60vh;overflow-y:auto;padding-right:4px">
+      ${days.map((d) => `
+        <div style="background:rgba(255,255,255,0.04);border-radius:12px;padding:12px">
+          <div style="font-weight:700;font-size:13px;margin-bottom:8px;text-transform:capitalize">${esc(d.label)}${d.iso === todayISO() ? ' <span style="color:var(--blue);font-weight:600">· azi</span>' : ''}</div>
+          ${d.tasks.length ? d.tasks.map((t) => `
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13px">
+              <span style="width:14px;height:14px;border-radius:50%;background:${t.done ? 'var(--green)' : 'rgba(255,255,255,0.1)'};flex-shrink:0"></span>
+              <span style="flex:1;${t.done ? 'color:var(--text-mute);text-decoration:line-through' : ''}">${esc(t.title)} ${esc(t.emoji || '')}</span>
+              <span style="font-size:11px;color:var(--text-dim)">${esc(t.time || '')}</span>
+            </div>
+          `).join('') : '<div style="font-size:12px;color:var(--text-dim);padding:4px 0">— nimic planificat —</div>'}
+        </div>
+      `).join('')}
+    </div>
+    <div class="btn-row" style="margin-top:14px">
+      <button class="btn -ghost" data-close-modal>Închide</button>
+      <button class="btn -primary" data-act="openAddTask">${IC.plus} Task nou</button>
+    </div>
+  `);
+}
+
+function openPlanModal() {
+  openModal(`
+    <h3>Planifică ziua</h3>
+    <p style="color:var(--text-dim);font-size:13px">Alege un template rapid și îți adaug task-urile.</p>
+    <div style="display:grid;gap:10px;margin:12px 0">
+      <button class="btn -ghost" id="tpl1" style="text-align:left;padding:14px">🌅 Dimineață focus (Antrenament, Citit, Deep work)</button>
+      <button class="btn -ghost" id="tpl2" style="text-align:left;padding:14px">💼 Zi de lucru completă (5 task-uri)</button>
+      <button class="btn -ghost" id="tpl3" style="text-align:left;padding:14px">🧘 Zi liniștită (Meditație, plimbare, jurnal)</button>
+    </div>
+    <div class="btn-row"><button class="btn -ghost" data-close-modal>Anulează</button></div>
+  `);
+  const tpls = {
+    tpl1: [
+      { title: 'Antrenament dimineață', emoji: '💪', time: '07:00' },
+      { title: 'Citit 20 pagini', emoji: '📖', time: '08:30' },
+      { title: 'Deep work', emoji: '💼', time: '10:00' },
+    ],
+    tpl2: SEED_TASKS.map((t) => ({ ...t, done: false })),
+    tpl3: [
+      { title: 'Meditație', emoji: '🧘', time: '08:00' },
+      { title: 'Plimbare 30min', emoji: '🚶', time: '11:00' },
+      { title: 'Jurnal seara', emoji: '✏️', time: '21:00' },
+    ],
+  };
+  ['tpl1', 'tpl2', 'tpl3'].forEach((k) => $('#' + k).addEventListener('click', async () => {
+    const today = todayISO();
+    const added = tpls[k].map((t) => {
+      const task = { id: uid(), title: t.title, emoji: t.emoji, date: today, time: t.time, done: false, chip: null, notifyId: null };
+      state.tasks.push(task);
+      return task;
+    });
+    save();
+    for (const t of added) await scheduleTaskPush(t);
+    closeModal(); renderScreen(); toast('Zi planificată.');
+  }));
+}
+
+async function testPushNow() {
+  const perm = await requestNotificationPermission();
+  if (perm !== 'granted') { toast('Permisiune necesară.'); return; }
+  state.push.permission = perm; state.push.enabled = true; save();
+  await fireLocalNotif('🐉 Test Dragon Life', 'Push local funcționează!', 'test', 'test');
+}
+
+/* ===== CLICK ROUTER ===== */
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  const act = el.dataset.act;
+  const id = el.dataset.id;
+  switch (act) {
+    case 'toggleTask':   e.stopPropagation(); toggleTask(id); break;
+    case 'toggleHabit':  e.stopPropagation(); toggleHabit(id); break;
+    case 'editTask':     e.stopPropagation(); openAddTaskModal(id); break;
+    case 'editHabit':    e.stopPropagation(); openAddHabitModal(id); break;
+    case 'delTask':      e.stopPropagation(); delTask(id); break;
+    case 'goTasks':      switchTab('tasks'); break;
+    case 'goHabits':     switchTab('habits'); break;
+    case 'openAddTask':  openAddTaskModal(); break;
+    case 'openAddLong':  openAddTaskModal(null, 'weekly'); break;
+    case 'openAddHabit': openAddHabitModal(); break;
+    case 'openProtocol': openProtocolModal(); break;
+    case 'openSleep':    openSleepModal(); break;
+    case 'openEnergy':   openEnergyModal(); break;
+    case 'editProfile':  openProfileEditModal(); break;
+    case 'notif':        openNotifModal(); break;
+    case 'stats':        openStatsModal(); break;
+    case 'notes':        openNotesModal(); break;
+    case 'planZi':       openPlanModal(); break;
+    case 'calendar':     openCalendarModal(); break;
+    case 'nextQuote':    state.quoteIndex = (state.quoteIndex + 1) % QUOTES.length; save(); renderScreen(); break;
+    case 'togglePush':   openNotifModal(); break;
+    case 'testPush':     testPushNow(); break;
+    case 'resetData':
+      if (confirm('Sigur resetezi TOATE datele? Nu se poate anula.')) {
+        localStorage.removeItem(KEY);
+        location.reload();
+      }
+      break;
+  }
+});
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#fabBtn')) {
+    if (state.currentTab === 'habits') openAddHabitModal();
+    else openAddTaskModal();
+  }
+});
+
+/* ===== INIT ===== */
+load();
+ensureMonthlyReset();
+ensureTasksDay();
+ensureHabitsDay();
+updateUsageStreak();
+renderScreen();
+checkServerPush().catch(() => {});
+if (state.push.enabled && Notification.permission === 'granted') {
+  waitForOneSignal().then((OS) => {
+    if (OS) OS.login(state.profile.userId).catch(() => {});
+  });
+}
+setInterval(localNotifTick, 30_000);
+setTimeout(localNotifTick, 5000);
+
+function updateUsageStreak() {
+  const today = todayISO();
   if (!state.usage.dates.includes(today)) {
     state.usage.dates.push(today);
     if (state.usage.dates.length > 365) state.usage.dates.shift();
@@ -458,1577 +1589,11 @@ function updateStreak() {
   const sorted = [...state.usage.dates].sort();
   let streak = 1;
   for (let i = sorted.length - 1; i > 0; i--) {
-    const d1 = new Date(sorted[i]);
-    const d2 = new Date(sorted[i - 1]);
-    const diff = (d1 - d2) / 86400000;
-    if (diff === 1) streak++;
-    else break;
+    const diff = (new Date(sorted[i]) - new Date(sorted[i - 1])) / 86400000;
+    if (diff === 1) streak++; else break;
   }
   state.usage.currentStreak = streak;
   if (streak > (state.usage.longestStreak || 0)) state.usage.longestStreak = streak;
   state.stats.streak = streak;
   save();
 }
-
-// ===== DAILY DATA FOR SPARKLINES =====
-function getDailyData(key, n) {
-  n = n || 10;
-  if (key === 'points' && state.stats.pointsHistory && state.stats.pointsHistory.length > 0) {
-    return state.stats.pointsHistory.slice(-n).map(x => x.pts);
-  }
-  if (key === 'tasks' && state.stats.tasksHistory && state.stats.tasksHistory.length > 0) {
-    return state.stats.tasksHistory.slice(-n).map(x => x.done);
-  }
-  if (key === 'sleep' && state.stats.sleepHistory && state.stats.sleepHistory.length > 0) {
-    return state.stats.sleepHistory.slice(-n);
-  }
-  if (key === 'streak') {
-    const base = state.usage.currentStreak || 1;
-    return Array.from({ length: n }, (_, i) => Math.max(1, base - (n - 1 - i)));
-  }
-  // demo data
-  const seeds = { points: [620,650,680,720,750,780,800,820,840,850], tasks: [3,5,4,6,5,7,6,8,7,9], sleep: [420,450,440,460,430,470,450,455,460,455], streak: [1,2,3,4,5,6,7,7,7,7] };
-  return (seeds[key] || seeds.points).slice(-n);
-}
-// ===== TOAST =====
-function toast(msg, duration) {
-  duration = duration || 2800;
-  const root = document.getElementById('toastRoot');
-  if (!root) return;
-  const el = document.createElement('div');
-  el.className = 'toast-item';
-  el.textContent = msg;
-  root.appendChild(el);
-  setTimeout(() => {
-    el.classList.add('out');
-    setTimeout(() => el.remove(), 280);
-  }, duration);
-}
-
-
-function showLoadingBar() {
-  const bar = document.getElementById('loadingBar');
-  if (!bar) return;
-  bar.style.width = '0%';
-  bar.style.opacity = '1';
-  bar.style.transition = 'none';
-  requestAnimationFrame(() => {
-    bar.style.transition = 'width 0.25s ease';
-    bar.style.width = '70%';
-    setTimeout(() => {
-      bar.style.transition = 'width 0.15s ease, opacity 0.3s ease';
-      bar.style.width = '100%';
-      setTimeout(() => { bar.style.opacity = '0'; }, 150);
-    }, 250);
-  });
-}
-
-// ===== MODAL SYSTEM =====
-function openModal(html, opts) {
-  opts = opts || {};
-  const root = document.getElementById('modalRoot');
-  root.style.pointerEvents = 'all';
-  const overlay = document.createElement('div');
-  overlay.className = 'modal-overlay' + (opts.center ? ' center' : '');
-  const modal = document.createElement('div');
-  modal.className = 'modal' + (opts.center ? ' center-modal' : '');
-  modal.innerHTML = (opts.center ? '' : '<div class="modal-handle"></div>') + html;
-  overlay.appendChild(modal);
-  root.appendChild(overlay);
-
-  function close() {
-    overlay.remove();
-    if (!root.querySelector('.modal-overlay')) root.style.pointerEvents = 'none';
-  }
-
-  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-  modal.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', close));
-  document.addEventListener('keydown', function esc(e) {
-    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
-  });
-  return { overlay, modal, close };
-}
-
-function closeAllModals() {
-  const root = document.getElementById('modalRoot');
-  root.innerHTML = '';
-  root.style.pointerEvents = 'none';
-}
-
-// ===== NAV & RENDER =====
-function setTab(tab) {
-  showLoadingBar();
-  state.currentTab = tab;
-  save();
-  document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.tab === tab);
-  });
-  render();
-}
-
-function render() {
-  const screen = document.getElementById('screen');
-  switch (state.currentTab) {
-    case 'dashboard': screen.innerHTML = renderDashboard(); break;
-    case 'tasks': screen.innerHTML = renderTasks(); break;
-    case 'habits': screen.innerHTML = renderHabits(); break;
-    case 'profile': screen.innerHTML = renderProfile(); break;
-    case 'notes': screen.innerHTML = renderNotes(); break;
-    case 'plan': screen.innerHTML = renderPlan(); break;
-    default: screen.innerHTML = renderDashboard();
-  }
-}
-
-// ===== DASHBOARD SCREEN =====
-function renderDashboard() {
-  const ds = computeDragonScore();
-  const today = todayISO();
-  const sleepMin = sleepMinutes(state.health.sleepFrom, state.health.sleepTo);
-  const unread = state.notifications.filter(n => !n.read).length;
-  const photo = state.profile.photo;
-  const avatarContent = photo
-    ? `<img src="${photo}" alt="avatar"/>`
-    : `<span>😊</span>`;
-  const c = ds.components;
-  const barColor = ds.total >= 81 ? '#a855f7' : ds.total >= 61 ? '#f97316' : ds.total >= 41 ? '#3b82f6' : '#22c55e';
-
-  return `<div class="dashboard-page">
-    <div class="dash-header">
-      <div class="dash-header-left">
-        <div class="dash-avatar" data-act="goProfile">${avatarContent}</div>
-        <div class="dash-greeting">
-          <h2>Buna, ${state.profile.name} 👋</h2>
-          <p>${state.profile.motto}</p>
-        </div>
-      </div>
-      <div class="dash-header-right">
-        <button class="icon-btn" data-act="openNotifsListModal" aria-label="Notificari">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" stroke-linejoin="round"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
-          ${unread > 0 ? '<span class="notif-badge"></span>' : ''}
-        </button>
-      </div>
-    </div>
-
-    <div class="dragon-score-card" data-act="openScoreModal">
-      <div class="ds-left">
-        <div class="ds-grade-emoji">${ds.grade.emoji}</div>
-        <div>
-          <div class="ds-grade-label" style="color:${ds.grade.color}">${ds.grade.label}</div>
-          <div class="ds-grade-sub">Scor Dragon</div>
-        </div>
-      </div>
-      <div class="ds-right">
-        <div class="ds-score" style="color:${ds.grade.color}">${ds.total}</div>
-        <div class="ds-score-max">/100</div>
-      </div>
-      <div class="ds-bar-track" style="margin-top:14px">
-        <div class="ds-bar-fill" style="width:${ds.total}%;background:${ds.grade.color}"></div>
-      </div>
-      <div class="ds-components">
-        <div class="ds-comp">
-          <div class="ds-comp-val">${c.tasks.done}/${c.tasks.total || '—'}</div>
-          <div class="ds-comp-lbl">Tasks</div>
-          <div class="ds-comp-bar"><div style="width:${c.tasks.score}%;background:#22c55e"></div></div>
-        </div>
-        <div class="ds-comp">
-          <div class="ds-comp-val">${c.habits.done}/${c.habits.total || '—'}</div>
-          <div class="ds-comp-lbl">Habits</div>
-          <div class="ds-comp-bar"><div style="width:${c.habits.score}%;background:#a855f7"></div></div>
-        </div>
-        <div class="ds-comp">
-          <div class="ds-comp-val">${c.health.score}%</div>
-          <div class="ds-comp-lbl">Health</div>
-          <div class="ds-comp-bar"><div style="width:${c.health.score}%;background:#ef4444"></div></div>
-        </div>
-        <div class="ds-comp">
-          <div class="ds-comp-val">${c.momentum.streak}🔥</div>
-          <div class="ds-comp-lbl">Streak</div>
-          <div class="ds-comp-bar"><div style="width:${c.momentum.score}%;background:#f97316"></div></div>
-        </div>
-      </div>
-      ${ds.insights.length > 0 ? `<div class="ds-insight">💡 ${ds.insights[0]}</div>` : ''}
-    </div>
-
-    <div class="health-dash-card" style="margin:0 16px 12px" data-act="openHealthModal">
-      <div class="card-title-row">
-        <span class="card-title">Sanatate &amp; Odihna</span>
-        <span style="font-size:10px;color:var(--accent)">Edit</span>
-      </div>
-      <div class="health-metric-row">
-        <span class="health-metric-icon">🌙</span>
-        <div class="health-metric-info">
-          <div class="health-metric-val">${sleepMin > 0 ? sleepLabel(sleepMin) : '—'}</div>
-          <div class="health-metric-lbl">Somn</div>
-          ${sleepMin > 0 ? `<div class="health-mini-bar"><div class="health-mini-bar-fill blue" style="width:${Math.min(100, (sleepMin / 480) * 100)}%"></div></div>` : ''}
-        </div>
-        <span class="health-metric-icon" style="margin-left:12px">⚡</span>
-        <div class="health-metric-info">
-          <div class="health-metric-val">${state.health.energy > 0 ? state.health.energy + '%' : '—'}</div>
-          <div class="health-metric-lbl">Energie</div>
-          ${state.health.energy > 0 ? `<div class="health-mini-bar"><div class="health-mini-bar-fill yellow" style="width:${state.health.energy}%"></div></div>` : ''}
-        </div>
-        <span class="health-metric-icon" style="margin-left:12px">💧</span>
-        <div class="health-metric-info">
-          <div class="health-metric-val">${state.health.water > 0 ? Math.round(state.health.water / 100) / 10 + 'L' : '—'}</div>
-          <div class="health-metric-lbl">Apa</div>
-          ${state.health.water > 0 ? `<div class="health-mini-bar"><div class="health-mini-bar-fill blue" style="width:${Math.min(100, (state.health.water / state.health.waterGoal) * 100)}%"></div></div>` : ''}
-        </div>
-      </div>
-    </div>
-
-    <div class="quick-actions">
-      <div class="quick-grid">
-        <button class="quick-btn" data-act="openAddTaskModal">
-          <span class="quick-btn-icon">✅</span>
-          <span class="quick-btn-label">Task nou</span>
-        </button>
-        <button class="quick-btn" data-act="openAddHabitModal">
-          <span class="quick-btn-icon">🔄</span>
-          <span class="quick-btn-label">Habit nou</span>
-        </button>
-        <button class="quick-btn" data-act="openHealthModal">
-          <span class="quick-btn-icon">❤️</span>
-          <span class="quick-btn-label">Sanatate</span>
-        </button>
-        <button class="quick-btn" data-act="openNotesModal">
-          <span class="quick-btn-icon">📝</span>
-          <span class="quick-btn-label">Note</span>
-        </button>
-      </div>
-    </div>
-  </div>`;
-}
-// ===== TASKS SCREEN =====
-let tasksFilter = 'today';
-let tasksSort = 'time-asc';
-let planViewMonth = null;
-
-function renderTasks() {
-  const today = todayISO();
-  let filtered = state.tasks;
-  if (tasksFilter === 'today') filtered = state.tasks.filter(t => t.date === today);
-  else if (tasksFilter === 'done') filtered = state.tasks.filter(t => t.done);
-  if (tasksSort === 'time-asc') filtered = filtered.slice().sort((a, b) => a.time.localeCompare(b.time));
-  else if (tasksSort === 'time-desc') filtered = filtered.slice().sort((a, b) => b.time.localeCompare(a.time));
-  else filtered = filtered.slice().sort((a, b) => Number(a.done) - Number(b.done));
-
-  return `<div class="tasks-page">
-    <div class="page-header">
-      <span class="page-title">Task-uri</span>
-      <button class="icon-btn" data-act="openAddTaskModal" aria-label="Adauga task">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
-      </button>
-    </div>
-    <div class="filter-bar">
-      <button class="filter-chip ${tasksFilter === 'today' ? 'active' : ''}" data-act="filterTasks" data-filter="today">Azi</button>
-      <button class="filter-chip ${tasksFilter === 'all' ? 'active' : ''}" data-act="filterTasks" data-filter="all">Toate</button>
-      <button class="filter-chip ${tasksFilter === 'done' ? 'active' : ''}" data-act="filterTasks" data-filter="done">Completate</button>
-      <div class="filter-chip${tasksSort === 'time-asc' ? '' : tasksSort === 'time-desc' ? ' sort-desc' : ' sort-done'} sort-chip" data-act="cycleTaskSort">⇅ ${tasksSort === 'time-asc' ? 'Ora ↑' : tasksSort === 'time-desc' ? 'Ora ↓' : 'Status'}</div>
-    </div>
-    <div class="tasks-list">
-      ${filtered.length === 0 ? `<div class="empty-state"><div class="empty-icon">✅</div><p>Niciun task ${tasksFilter === 'today' ? 'azi' : ''}</p><small>Apasa + pentru a adauga</small></div>` : filtered.map(t => `
-      <div class="task-item">
-        <div class="task-checkbox ${t.done ? 'done' : ''}" data-act="toggleTask" data-id="${t.id}"></div>
-        <div class="task-body" data-act="openEditTaskModal" data-id="${t.id}">
-          <div class="task-title-row">
-            <span class="task-emoji">${t.emoji}</span>
-            <span class="task-title ${t.done ? 'done' : ''}">${t.title}</span>
-          </div>
-          <div class="task-meta">
-            <span class="task-time">🕐 ${t.time}</span>
-            <span class="task-chip ${t.chip || 'personal'}">${t.chip === 'work' ? 'Munca' : t.chip === 'health' ? 'Sanatate' : 'Personal'}</span>
-          </div>
-        </div>
-      </div>`).join('')}
-    </div>
-  </div>`;
-}
-
-// ===== NOTES SCREEN =====
-function renderNotes() {
-  return `<div class="notes-page">
-    <div class="page-header">
-      <span class="page-title">Note</span>
-    </div>
-    <div class="note-compose">
-      <textarea class="note-textarea" id="noteCompose" placeholder="Scrie o nota..." rows="3"></textarea>
-      <button class="btn btn-primary note-add-btn" id="noteAddBtn">Adauga</button>
-    </div>
-    <div class="notes-list" id="notesList">
-      ${state.notes.length === 0
-        ? '<div class="empty-state"><div class="empty-icon">📝</div><p>Nicio nota inca</p><small>Scrie prima ta nota mai sus</small></div>'
-        : state.notes.slice().reverse().map(n => `
-        <div class="note-card" data-note-id="${n.id}">
-          <div class="note-card-text">${n.text.replace(/\n/g, '<br>')}</div>
-          <div class="note-card-footer">
-            <span class="note-card-date">${n.date}</span>
-            <button class="note-card-del" data-act="deleteNote" data-id="${n.id}">✕</button>
-          </div>
-        </div>`).join('')}
-    </div>
-  </div>`;
-}
-
-// ===== HABITS SCREEN =====
-function renderHabits() {
-  const doneHabits = state.habits.filter(h => h.done).length;
-  const totalHabits = state.habits.length;
-  const today = new Date();
-  const days30 = [];
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    days30.push(d.toISOString().slice(0, 10));
-  }
-
-  return `<div class="habits-page">
-    <div class="page-header">
-      <span class="page-title">Obiceiuri</span>
-      <button class="icon-btn" data-act="openAddHabitModal" aria-label="Adauga obicei">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
-      </button>
-    </div>
-    <div class="donut-section">
-      <div class="donut-wrap">
-        ${donutChart(doneHabits, totalHabits, 110)}
-        <div class="donut-label">${doneHabits} din ${totalHabits} obiceiuri azi</div>
-      </div>
-    </div>
-    <div class="habits-grid">
-      ${state.habits.map(h => `
-      <div class="habit-item">
-        <div class="habit-cb-big ${h.done ? 'done' : ''}" data-act="toggleHabit" data-id="${h.id}"></div>
-        <div class="habit-body">
-          <div class="habit-name-row">
-            <span class="habit-emoji">${h.emoji}</span>
-            <span class="habit-name">${h.title}</span>
-          </div>
-          <div class="habit-streak">${h.streak > 0 ? '🔥 ' + h.streak + ' zile la rand' : 'Incepe azi!'}</div>
-        </div>
-        <button class="habit-edit-btn" data-act="openEditHabitModal" data-id="${h.id}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/><path d="M17.414 2.586a2 2 0 0 1 2.828 2.828L11 14.828 7 16l1.172-4L17.414 2.586z" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-      </div>`).join('')}
-    </div>
-    <div class="habit-calendar">
-      <div class="habit-cal-title">Ultimele 30 zile</div>
-      <div class="habit-cal-grid">
-        ${days30.map(d => {
-          const isToday = d === todayISO();
-          const hasActivity = state.usage.dates && state.usage.dates.includes(d);
-          return `<div class="cal-day ${hasActivity ? 'has-activity' : ''} ${isToday ? 'today' : ''}">${new Date(d + 'T12:00:00').getDate()}</div>`;
-        }).join('')}
-      </div>
-    </div>
-  </div>`;
-}
-
-// ===== PLAN SCREEN =====
-function renderPlan() {
-  const today = new Date();
-  if (!planViewMonth) planViewMonth = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2,'0');
-  const [yr, mo] = planViewMonth.split('-').map(Number);
-  const monthDate = new Date(yr, mo - 1, 1);
-  const monthName = monthDate.toLocaleDateString('ro-RO', { month: 'long', year: 'numeric' });
-  const firstDay = (monthDate.getDay() + 6) % 7;
-  const daysInMonth = new Date(yr, mo, 0).getDate();
-
-  const eventsThisMonth = (state.plan || []).filter(e => e.date.startsWith(planViewMonth));
-  const eventsByDay = {};
-  eventsThisMonth.forEach(e => {
-    const d = parseInt(e.date.split('-')[2]);
-    if (!eventsByDay[d]) eventsByDay[d] = [];
-    eventsByDay[d].push(e);
-  });
-
-  const todayISO2 = todayISO();
-
-  let cells = '';
-  for (let i = 0; i < firstDay; i++) cells += '<div class="plan-cal-cell empty"></div>';
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateStr = yr + '-' + String(mo).padStart(2,'0') + '-' + String(d).padStart(2,'0');
-    const isToday = dateStr === todayISO2;
-    const hasEvents = eventsByDay[d] && eventsByDay[d].length > 0;
-    const dots = hasEvents ? `<div class="plan-cal-dots">${eventsByDay[d].slice(0,3).map(() => '<span class="plan-cal-dot"></span>').join('')}</div>` : '';
-    cells += `<div class="plan-cal-cell${isToday ? ' today' : ''}${hasEvents ? ' has-events' : ''}" data-act="openPlanDay" data-date="${dateStr}">
-      <span class="plan-cal-num">${d}</span>${dots}
-    </div>`;
-  }
-
-  const upcoming = (state.plan || [])
-    .filter(e => e.date >= todayISO2)
-    .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
-    .slice(0, 20);
-
-  return `<div class="plan-page">
-    <div class="page-header">
-      <span class="page-title">Planificare</span>
-      <button class="icon-btn" data-act="openAddPlanModal" aria-label="Eveniment nou">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
-      </button>
-    </div>
-    <div class="plan-cal-header">
-      <button class="plan-cal-nav" data-act="planPrevMonth">‹</button>
-      <span class="plan-cal-month">${monthName}</span>
-      <button class="plan-cal-nav" data-act="planNextMonth">›</button>
-    </div>
-    <div class="plan-cal-weekdays">
-      ${['Lu','Ma','Mi','Jo','Vi','Sa','Du'].map(d => `<div class="plan-cal-wd">${d}</div>`).join('')}
-    </div>
-    <div class="plan-cal-grid">${cells}</div>
-    <div class="plan-upcoming">
-      <div class="section-title" style="padding:12px 16px 8px">Urmatoare</div>
-      ${upcoming.length === 0
-        ? '<div class="empty-state" style="padding:20px"><div class="empty-icon">📅</div><p>Niciun eveniment planificat</p><small>Apasa + pentru a adauga</small></div>'
-        : upcoming.map(e => `
-        <div class="plan-event-item">
-          <div class="plan-event-emoji">${e.emoji || '📅'}</div>
-          <div class="plan-event-body">
-            <div class="plan-event-title">${e.title}</div>
-            <div class="plan-event-meta">${e.date} · ${e.time}</div>
-          </div>
-          <button class="plan-event-del" data-act="deletePlanEvent" data-id="${e.id}">✕</button>
-        </div>`).join('')}
-    </div>
-  </div>`;
-}
-
-async function schedulePlanNotif(ev) {
-  const extId = state.profile._pushId;
-  if (!extId) return null;
-  const sendAt = new Date(ev.date + 'T' + ev.time + ':00').toISOString();
-  if (new Date(sendAt) <= new Date()) return null;
-  const res = await fetch('/api?action=schedule', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ externalId: extId, title: (ev.emoji || '📅') + ' ' + ev.title, body: 'Astazi la ' + ev.time, sendAt })
-  }).then(r => r.json()).catch(() => ({}));
-  return res.id || null;
-}
-
-function openAddPlanModal(prefillDate) {
-  closeAllModals();
-  const today = todayISO();
-  const { modal, close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title">Eveniment nou</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">Titlu</label>
-        <input class="form-input" id="pTitle" placeholder="Ex: Intalnire doctor..." />
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Data</label>
-          <input class="form-input" id="pDate" type="date" value="${prefillDate || today}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Ora</label>
-          <input class="form-input" id="pTime" type="time" value="09:00" />
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Emoji</label>
-        <div class="emoji-picker" id="pEmojiPicker">
-          ${['📅','🏥','💼','🎂','✈️','🏋️','📞','🎯','💡','🎉'].map(em => `<div class="emoji-opt${em === '📅' ? ' selected' : ''}" data-emoji="${em}">${em}</div>`).join('')}
-        </div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" data-close>Anuleaza</button>
-      <button class="btn btn-primary" id="pSaveBtn">Salveaza + Push</button>
-    </div>
-  `);
-
-  let selEmoji = '📅';
-  modal.querySelectorAll('.emoji-opt').forEach(opt => {
-    opt.addEventListener('click', () => {
-      modal.querySelectorAll('.emoji-opt').forEach(o => o.classList.remove('selected'));
-      opt.classList.add('selected');
-      selEmoji = opt.dataset.emoji;
-    });
-  });
-
-  modal.querySelector('#pSaveBtn').addEventListener('click', async () => {
-    const title = modal.querySelector('#pTitle').value.trim();
-    const date = modal.querySelector('#pDate').value;
-    const time = modal.querySelector('#pTime').value;
-    if (!title || !date || !time) { toast('Completeaza toate campurile'); return; }
-    const ev = { id: uid(), title, emoji: selEmoji, date, time, notifId: null };
-    if (!state.plan) state.plan = [];
-    state.plan.push(ev);
-    save();
-    close();
-    render();
-    toast('Eveniment adaugat! 📅');
-    const notifId = await schedulePlanNotif(ev);
-    if (notifId) {
-      ev.notifId = notifId;
-      save();
-      toast('Push programat! 🔔');
-    }
-  });
-}
-
-function deletePlanEvent(id) {
-  const ev = (state.plan || []).find(e => e.id === id);
-  if (!ev) return;
-  if (ev.notifId) {
-    fetch('/api?action=cancel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: ev.notifId }) }).catch(() => {});
-  }
-  state.plan = state.plan.filter(e => e.id !== id);
-  save();
-  render();
-  toast('Eveniment sters');
-}
-
-// ===== PROFILE SCREEN =====
-function renderProfile() {
-  const prog = computeProgress();
-  const photo = state.profile.photo;
-  const avatarContent = photo
-    ? `<img src="${photo}" alt="avatar"/>`
-    : `<span style="font-size:36px">😊</span>`;
-
-  return `<div class="profile-page">
-    <input type="file" id="avatarInput" accept="image/*" data-act="handleAvatarUpload"/>
-    <div class="profile-hero">
-      <div class="profile-avatar-big" data-act="triggerAvatarUpload">
-        ${avatarContent}
-        <div style="position:absolute;bottom:0;right:0;width:26px;height:26px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:12px">📷</div>
-      </div>
-      <div class="profile-name">${state.profile.name}</div>
-      <div class="profile-motto">${state.profile.motto}</div>
-    </div>
-
-    <div class="profile-stats-grid">
-      <div class="profile-stat">
-        <div class="profile-stat-val">${state.stats.points}</div>
-        <div class="profile-stat-lbl">Puncte</div>
-      </div>
-      <div class="profile-stat">
-        <div class="profile-stat-val">${state.stats.streak}</div>
-        <div class="profile-stat-lbl">Serie zile</div>
-      </div>
-      <div class="profile-stat">
-        <div class="profile-stat-val">${state.tasks.filter(t => t.done).length}</div>
-        <div class="profile-stat-lbl">Task-uri done</div>
-      </div>
-    </div>
-
-    <div class="profile-section" style="margin-top:12px">
-      <div class="profile-section-title">Cont</div>
-      <div class="profile-row" data-act="openEditProfileModal">
-        <span class="profile-row-icon">👤</span>
-        <div class="profile-row-body">
-          <div class="profile-row-label">Editeaza profil</div>
-          <div class="profile-row-sub">Nume, motto, avatar</div>
-        </div>
-        <span class="profile-row-arrow">›</span>
-      </div>
-      <div class="profile-row" data-act="openStatsModal">
-        <span class="profile-row-icon">📊</span>
-        <div class="profile-row-body">
-          <div class="profile-row-label">Statistici detaliate</div>
-          <div class="profile-row-sub">Grafice saptamanale</div>
-        </div>
-        <span class="profile-row-arrow">›</span>
-      </div>
-      <div class="profile-row" data-act="openCalendarModal">
-        <span class="profile-row-icon">📅</span>
-        <div class="profile-row-body">
-          <div class="profile-row-label">Calendar activitate</div>
-          <div class="profile-row-sub">Zile active</div>
-        </div>
-        <span class="profile-row-arrow">›</span>
-      </div>
-    </div>
-`;
-}
-// ===== MODALS =====
-const TASK_EMOJIS = ['💪','📖','🏢','🥗','📵','🎯','🏃','🧘','💊','📝','🎨','🎸','💻','🌿','☕'];
-const HABIT_EMOJIS = ['💧','🌸','📖','🌙','🚫','✏️','🧠','🏃','🧘','💊','🥗','☕','🎨','🎸','📝'];
-
-function openAddTaskModal() {
-  closeAllModals();
-  let selEmoji = '📝';
-  let selChip = 'personal';
-  const today = todayISO();
-  const { modal, close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title">Task nou</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">Titlu task</label>
-        <input class="form-input" id="mTaskTitle" placeholder="Ex: Antrenament dimineata" maxlength="60"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Emoji</label>
-        <div class="emoji-picker" id="mTaskEmojiPicker">
-          ${TASK_EMOJIS.map(e => `<div class="emoji-opt${e === selEmoji ? ' selected' : ''}" data-emoji="${e}">${e}</div>`).join('')}
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Data</label>
-          <input class="form-input" id="mTaskDate" type="date" value="${today}"/>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Ora</label>
-          <input class="form-input" id="mTaskTime" type="time" value="08:00"/>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Categorie</label>
-        <div class="chip-row">
-          <div class="chip work${selChip === 'work' ? ' selected' : ''}" data-chip="work">Munca</div>
-          <div class="chip health${selChip === 'health' ? ' selected' : ''}" data-chip="health">Sanatate</div>
-          <div class="chip personal${selChip === 'personal' ? ' selected' : ''}" data-chip="personal">Personal</div>
-        </div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" data-close>Anuleaza</button>
-      <button class="btn btn-primary" id="mTaskSave">Salveaza</button>
-    </div>
-  `);
-
-  modal.querySelectorAll('.emoji-opt').forEach(el => {
-    el.addEventListener('click', () => {
-      selEmoji = el.dataset.emoji;
-      modal.querySelectorAll('.emoji-opt').forEach(e => e.classList.remove('selected'));
-      el.classList.add('selected');
-    });
-  });
-  modal.querySelectorAll('[data-chip]').forEach(el => {
-    el.addEventListener('click', () => {
-      selChip = el.dataset.chip;
-      modal.querySelectorAll('[data-chip]').forEach(c => c.classList.remove('selected'));
-      el.classList.add('selected');
-    });
-  });
-  modal.querySelector('#mTaskSave').addEventListener('click', () => {
-    const title = modal.querySelector('#mTaskTitle').value.trim();
-    const date = modal.querySelector('#mTaskDate').value;
-    const time = modal.querySelector('#mTaskTime').value;
-    if (!title) { toast('Scrie un titlu!'); return; }
-    const task = { id: uid(), title, emoji: selEmoji, date: date || today, time: time || '08:00', done: false, chip: selChip, notifyId: null };
-    state.tasks.push(task);
-    save();
-    scheduleNotification(task);
-    close();
-    render();
-    toast('Task adaugat! ✅');
-  });
-}
-
-function openEditTaskModal(id) {
-  const t = state.tasks.find(x => x.id === id);
-  if (!t) return;
-  let selEmoji = t.emoji || '📝';
-  let selChip = t.chip || 'personal';
-
-  const { modal, close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title">Editeaza task</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">Titlu task</label>
-        <input class="form-input" id="mTaskTitle" value="${t.title}" maxlength="60"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Emoji</label>
-        <div class="emoji-picker" id="mTaskEmojiPicker">
-          ${TASK_EMOJIS.map(e => `<div class="emoji-opt${e === selEmoji ? ' selected' : ''}" data-emoji="${e}">${e}</div>`).join('')}
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Data</label>
-          <input class="form-input" id="mTaskDate" type="date" value="${t.date}"/>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Ora</label>
-          <input class="form-input" id="mTaskTime" type="time" value="${t.time}"/>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Categorie</label>
-        <div class="chip-row">
-          <div class="chip work${selChip === 'work' ? ' selected' : ''}" data-chip="work">Munca</div>
-          <div class="chip health${selChip === 'health' ? ' selected' : ''}" data-chip="health">Sanatate</div>
-          <div class="chip personal${selChip === 'personal' ? ' selected' : ''}" data-chip="personal">Personal</div>
-        </div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-danger" id="mTaskDel">Sterge</button>
-      <button class="btn btn-primary" id="mTaskSave">Salveaza</button>
-    </div>
-  `);
-
-  modal.querySelectorAll('.emoji-opt').forEach(el => {
-    el.addEventListener('click', () => {
-      selEmoji = el.dataset.emoji;
-      modal.querySelectorAll('.emoji-opt').forEach(e => e.classList.remove('selected'));
-      el.classList.add('selected');
-    });
-  });
-  modal.querySelectorAll('[data-chip]').forEach(el => {
-    el.addEventListener('click', () => {
-      selChip = el.dataset.chip;
-      modal.querySelectorAll('[data-chip]').forEach(c => c.classList.remove('selected'));
-      el.classList.add('selected');
-    });
-  });
-  modal.querySelector('#mTaskSave').addEventListener('click', () => {
-    const title = modal.querySelector('#mTaskTitle').value.trim();
-    const date = modal.querySelector('#mTaskDate').value;
-    const time = modal.querySelector('#mTaskTime').value;
-    if (!title) { toast('Scrie un titlu!'); return; }
-    const idx = state.tasks.findIndex(x => x.id === id);
-    if (idx !== -1) {
-      state.tasks[idx] = { ...state.tasks[idx], title, emoji: selEmoji, date, time, chip: selChip };
-      save();
-      scheduleNotification(state.tasks[idx]);
-    }
-    close();
-    render();
-    toast('Task actualizat!');
-  });
-  modal.querySelector('#mTaskDel').addEventListener('click', () => {
-    state.tasks = state.tasks.filter(x => x.id !== id);
-    save();
-    close();
-    render();
-    toast('Task sters');
-  });
-}
-
-function openAddHabitModal() {
-  closeAllModals();
-  let selEmoji = '✏️';
-  const { modal, close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title">Obicei nou</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">Titlu obicei</label>
-        <input class="form-input" id="mHabitTitle" placeholder="Ex: Hidratare" maxlength="40"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Emoji</label>
-        <div class="emoji-picker">
-          ${HABIT_EMOJIS.map(e => `<div class="emoji-opt${e === selEmoji ? ' selected' : ''}" data-emoji="${e}">${e}</div>`).join('')}
-        </div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" data-close>Anuleaza</button>
-      <button class="btn btn-primary" id="mHabitSave">Adauga</button>
-    </div>
-  `);
-  modal.querySelectorAll('.emoji-opt').forEach(el => {
-    el.addEventListener('click', () => {
-      selEmoji = el.dataset.emoji;
-      modal.querySelectorAll('.emoji-opt').forEach(e => e.classList.remove('selected'));
-      el.classList.add('selected');
-    });
-  });
-  modal.querySelector('#mHabitSave').addEventListener('click', () => {
-    const title = modal.querySelector('#mHabitTitle').value.trim();
-    if (!title) { toast('Scrie un titlu!'); return; }
-    state.habits.push({ id: uid(), title, emoji: selEmoji, done: false, doneDate: null, streak: 0 });
-    save();
-    close();
-    render();
-    toast('Obicei adaugat! 🌟');
-  });
-}
-
-function openEditHabitModal(id) {
-  const h = state.habits.find(x => x.id === id);
-  if (!h) return;
-  let selEmoji = h.emoji || '✏️';
-  const { modal, close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title">Editeaza obicei</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">Titlu</label>
-        <input class="form-input" id="mHabitTitle" value="${h.title}" maxlength="40"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Emoji</label>
-        <div class="emoji-picker">
-          ${HABIT_EMOJIS.map(e => `<div class="emoji-opt${e === selEmoji ? ' selected' : ''}" data-emoji="${e}">${e}</div>`).join('')}
-        </div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-danger" id="mHabitDel">Sterge</button>
-      <button class="btn btn-primary" id="mHabitSave">Salveaza</button>
-    </div>
-  `);
-  modal.querySelectorAll('.emoji-opt').forEach(el => {
-    el.addEventListener('click', () => {
-      selEmoji = el.dataset.emoji;
-      modal.querySelectorAll('.emoji-opt').forEach(e => e.classList.remove('selected'));
-      el.classList.add('selected');
-    });
-  });
-  modal.querySelector('#mHabitSave').addEventListener('click', () => {
-    const title = modal.querySelector('#mHabitTitle').value.trim();
-    if (!title) { toast('Scrie un titlu!'); return; }
-    const idx = state.habits.findIndex(x => x.id === id);
-    if (idx !== -1) state.habits[idx] = { ...state.habits[idx], title, emoji: selEmoji };
-    save();
-    close();
-    render();
-    toast('Obicei actualizat!');
-  });
-  modal.querySelector('#mHabitDel').addEventListener('click', () => {
-    state.habits = state.habits.filter(x => x.id !== id);
-    save();
-    close();
-    render();
-    toast('Obicei sters');
-  });
-}
-
-function openHealthModal() {
-  const h = state.health;
-  const { modal, close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title">Sanatate &amp; Odihna</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">Ritm cardiac (BPM)</label>
-        <input class="form-input" id="mBpm" type="number" min="40" max="200" value="${h.bpm}"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Nivel energie: <span id="mEnergyVal">${h.energy}%</span></label>
-        <input class="form-slider" id="mEnergy" type="range" min="0" max="100" value="${h.energy}"/>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Culcare</label>
-          <input class="form-input" id="mSleepFrom" type="time" value="${h.sleepFrom}"/>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Trezire</label>
-          <input class="form-input" id="mSleepTo" type="time" value="${h.sleepTo}"/>
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Apa consumata (ml)</label>
-        <input class="form-input" id="mWater" type="number" min="0" max="5000" value="${h.water}" step="50"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Mese</label>
-        <div class="meal-chips">
-          <div class="meal-chip${h.meals.mic ? ' active' : ''}" data-meal="mic">Mic dejun</div>
-          <div class="meal-chip${h.meals.pranz ? ' active' : ''}" data-meal="pranz">Pranz</div>
-          <div class="meal-chip${h.meals.gustare ? ' active' : ''}" data-meal="gustare">Gustare</div>
-          <div class="meal-chip${h.meals.cina ? ' active' : ''}" data-meal="cina">Cina</div>
-        </div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" data-close>Anuleaza</button>
-      <button class="btn btn-primary" id="mHealthSave">Salveaza</button>
-    </div>
-  `);
-
-  const energySlider = modal.querySelector('#mEnergy');
-  const energyVal = modal.querySelector('#mEnergyVal');
-  energySlider.addEventListener('input', () => { energyVal.textContent = energySlider.value + '%'; });
-
-  const mealMap = {};
-  modal.querySelectorAll('[data-meal]').forEach(el => {
-    mealMap[el.dataset.meal] = h.meals[el.dataset.meal] || false;
-    el.addEventListener('click', () => {
-      mealMap[el.dataset.meal] = !mealMap[el.dataset.meal];
-      el.classList.toggle('active', mealMap[el.dataset.meal]);
-    });
-  });
-
-  modal.querySelector('#mHealthSave').addEventListener('click', () => {
-    const bpm = parseInt(modal.querySelector('#mBpm').value) || 0;
-    const energy = parseInt(modal.querySelector('#mEnergy').value) || 0;
-    const sleepFrom = modal.querySelector('#mSleepFrom').value;
-    const sleepTo = modal.querySelector('#mSleepTo').value;
-    const water = parseInt(modal.querySelector('#mWater').value) || 0;
-    const prevSf = state.health.sleepFrom;
-    const prevSt = state.health.sleepTo;
-    state.health = { ...state.health, bpm, energy, sleepFrom, sleepTo, water, meals: { ...mealMap } };
-    save();
-    close();
-    render();
-    toast('Date sanatate salvate! 💪');
-    if (sleepFrom && sleepTo && (sleepFrom !== prevSf || sleepTo !== prevSt)) {
-      scheduleSleepNotifs(sleepFrom, sleepTo, state.profile.name).catch(() => {});
-    }
-    checkNightMode();
-  });
-}
-function openScoreModal() {
-  const ds = computeDragonScore();
-  const c = ds.components;
-  function bar(score, color) {
-    return `<div class="score-bar-track"><div class="score-bar-fill" style="width:${score}%;background:${color}"></div></div>`;
-  }
-  openModal(`
-    <div class="modal-header">
-      <span class="modal-title">Dragon Score</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <div style="text-align:center;padding:12px 0 20px">
-        <div style="font-size:56px;line-height:1">${ds.grade.emoji}</div>
-        <div style="font-size:52px;font-weight:900;color:${ds.grade.color};line-height:1.1">${ds.total}</div>
-        <div style="font-size:18px;font-weight:700;color:${ds.grade.color};margin-top:4px">${ds.grade.label}</div>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:14px">
-        <div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px;font-weight:600;color:var(--text)">✅ Task-uri</span><span style="font-size:13px;font-weight:700;color:#22c55e">${c.tasks.score}%</span></div>
-          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">${c.tasks.done} din ${c.tasks.total} finalizate azi · bonus muncă + penalizare restante</div>
-          ${bar(c.tasks.score, '#22c55e')}
-        </div>
-        <div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px;font-weight:600;color:var(--text)">🔄 Obiceiuri</span><span style="font-size:13px;font-weight:700;color:#a855f7">${c.habits.score}%</span></div>
-          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">${c.habits.done} din ${c.habits.total} bifate · bonus serie + toate complete</div>
-          ${bar(c.habits.score, '#a855f7')}
-        </div>
-        <div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px;font-weight:600;color:var(--text)">❤️ Sanatate</span><span style="font-size:13px;font-weight:700;color:#ef4444">${c.health.score}%</span></div>
-          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Somn ${c.health.details.sleep}% · Energie ${c.health.details.energy}% · Apa ${c.health.details.water}% · Mese ${c.health.details.meals}%</div>
-          ${bar(c.health.score, '#ef4444')}
-        </div>
-        <div>
-          <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-size:13px;font-weight:600;color:var(--text)">🔥 Momentum</span><span style="font-size:13px;font-weight:700;color:#f97316">${c.momentum.score}%</span></div>
-          <div style="font-size:11px;color:var(--text3);margin-bottom:4px">Serie ${c.momentum.streak} zile · consistenta + trend puncte</div>
-          ${bar(c.momentum.score, '#f97316')}
-        </div>
-      </div>
-      ${ds.insights.length > 0 ? `<div style="margin-top:16px;padding:12px;background:var(--bg3);border-radius:var(--radius-sm);border:1px solid var(--border)">
-        <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px">💡 Observatii</div>
-        ${ds.insights.map(i => `<div style="font-size:12px;color:var(--text);margin-bottom:4px">• ${i}</div>`).join('')}
-      </div>` : ''}
-    </div>
-  `);
-}
-
-function openStatsModal() {
-  const prog = computeProgress();
-  const days = ['Lu', 'Ma', 'Mi', 'Jo', 'Vi', 'Sa', 'Du'];
-  const taskData = getDailyData('tasks', 7);
-  const maxTasks = Math.max(...taskData, 1);
-  const { close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title">Statistici</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="stats-section">
-        <div class="stats-section-title">Sumar general</div>
-        <div class="stats-row">
-          <div class="stats-kpi"><div class="stats-kpi-val">${state.stats.points}</div><div class="stats-kpi-lbl">Puncte</div></div>
-          <div class="stats-kpi"><div class="stats-kpi-val">${state.stats.streak}</div><div class="stats-kpi-lbl">Serie zile</div></div>
-          <div class="stats-kpi"><div class="stats-kpi-val">${state.usage.longestStreak || 0}</div><div class="stats-kpi-lbl">Maxim serie</div></div>
-        </div>
-        <div class="stats-row">
-          <div class="stats-kpi"><div class="stats-kpi-val">${prog.overallPct}%</div><div class="stats-kpi-lbl">Progres azi</div></div>
-          <div class="stats-kpi"><div class="stats-kpi-val">${state.habits.filter(h => h.done).length}/${state.habits.length}</div><div class="stats-kpi-lbl">Obiceiuri azi</div></div>
-          <div class="stats-kpi"><div class="stats-kpi-val">${state.tasks.filter(t => t.done).length}</div><div class="stats-kpi-lbl">Tasks done</div></div>
-        </div>
-      </div>
-      <div class="stats-section">
-        <div class="stats-section-title">Task-uri ultima saptamana</div>
-        <div class="weekly-bars">
-          ${days.map((d, i) => {
-            const val = taskData[i] || 0;
-            const pct = Math.round((val / maxTasks) * 100);
-            return `<div class="weekly-bar-wrap">
-              <div class="weekly-bar-track"><div class="weekly-bar-fill" style="height:${pct}%"></div></div>
-              <div class="weekly-bar-lbl">${d}</div>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>
-      <div class="stats-section">
-        <div class="stats-section-title">Somn ultima saptamana</div>
-        <div style="padding:8px 0">${sparkline(getDailyData('sleep', 7), 280, 60, '#3b82f6')}</div>
-      </div>
-      <div class="stats-section">
-        <div class="stats-section-title">Puncte acumulate</div>
-        <div style="padding:8px 0">${sparkline(getDailyData('points', 10), 280, 60, '#a855f7')}</div>
-      </div>
-    </div>
-  `);
-}
-
-function openCalendarModal() {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const monthNames = ['Ianuarie','Februarie','Martie','Aprilie','Mai','Iunie','Iulie','August','Septembrie','Octombrie','Noiembrie','Decembrie'];
-  const startPad = (firstDay + 6) % 7;
-  const activeDates = new Set(state.usage.dates || []);
-
-  let calCells = '';
-  for (let p = 0; p < startPad; p++) calCells += '<div class="cal-modal-day empty"></div>';
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const isToday = dateStr === todayISO();
-    const isActive = activeDates.has(dateStr);
-    calCells += `<div class="cal-modal-day${isActive ? ' active' : ''}${isToday ? ' today' : ''}">${d}</div>`;
-  }
-
-  openModal(`
-    <div class="modal-header">
-      <span class="modal-title">📅 ${monthNames[month]} ${year}</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="cal-modal-grid">
-        <div class="cal-modal-hdr">Lu</div>
-        <div class="cal-modal-hdr">Ma</div>
-        <div class="cal-modal-hdr">Mi</div>
-        <div class="cal-modal-hdr">Jo</div>
-        <div class="cal-modal-hdr">Vi</div>
-        <div class="cal-modal-hdr">Sa</div>
-        <div class="cal-modal-hdr">Du</div>
-        ${calCells}
-      </div>
-      <div style="margin-top:16px;display:flex;gap:12px;font-size:12px;color:var(--text2)">
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--accent);margin-right:4px"></span>Zi activa</span>
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:1.5px solid var(--accent);margin-right:4px"></span>Azi</span>
-      </div>
-    </div>
-  `);
-}
-
-function openNotesModal() {
-  closeAllModals();
-  function renderNotesList(modal) {
-    const list = modal.querySelector('#notesList');
-    list.innerHTML = state.notes.length === 0
-      ? '<div class="empty-state" style="padding:20px"><div class="empty-icon">📝</div><p>Nicio nota</p></div>'
-      : state.notes.map(n => `
-        <div class="note-item">
-          <div class="note-text">${n.text}</div>
-          <button class="note-del" data-note-id="${n.id}">✕</button>
-        </div>`).join('');
-    list.querySelectorAll('[data-note-id]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        state.notes = state.notes.filter(x => x.id !== btn.dataset.noteId);
-        save();
-        renderNotesList(modal);
-      });
-    });
-  }
-
-  const { modal, close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title">Note rapide</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <textarea class="form-input" id="noteInput" rows="3" placeholder="Scrie o nota rapida..."></textarea>
-      </div>
-      <button class="btn btn-primary btn-full" id="noteSaveBtn" style="margin-bottom:16px">Adauga nota</button>
-      <div id="notesList"></div>
-    </div>
-  `);
-  renderNotesList(modal);
-  modal.querySelector('#noteSaveBtn').addEventListener('click', () => {
-    const text = modal.querySelector('#noteInput').value.trim();
-    if (!text) return;
-    state.notes.push({ id: uid(), text, date: todayISO() });
-    save();
-    modal.querySelector('#noteInput').value = '';
-    renderNotesList(modal);
-    toast('Nota salvata! 📝');
-  });
-}
-
-function openPlanDayModal() {
-  const today = todayISO();
-  const todayTasks = state.tasks.filter(t => t.date === today).sort((a, b) => a.time.localeCompare(b.time));
-
-  const { modal, close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title">🎯 Planifica ziua</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <p style="font-size:13px;color:var(--text2);margin-bottom:12px">Task-urile tale pentru azi (ordonate dupa ora):</p>
-      ${todayTasks.length === 0
-        ? '<div class="empty-state"><div class="empty-icon">🎯</div><p>Niciun task azi</p></div>'
-        : todayTasks.map(t => `
-          <div class="plan-task-item">
-            <span class="plan-drag-handle">⠿</span>
-            <span style="font-size:16px">${t.emoji}</span>
-            <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600;color:${t.done ? 'var(--text3)' : 'var(--text)'};${t.done ? 'text-decoration:line-through' : ''}">${t.title}</div>
-              <div style="font-size:11px;color:var(--text3)">${t.time}</div>
-            </div>
-            <div class="task-checkbox ${t.done ? 'done' : ''}" data-act="toggleTask" data-id="${t.id}"></div>
-          </div>`).join('')}
-      <button class="btn btn-primary btn-full" id="planAddTask" style="margin-top:12px">+ Adauga task nou</button>
-    </div>
-  `);
-  modal.querySelector('#planAddTask').addEventListener('click', () => { close(); openAddTaskModal(); });
-  modal.querySelectorAll('[data-act="toggleTask"]').forEach(cb => {
-    cb.addEventListener('click', () => {
-      const taskId = cb.dataset.id;
-      const task = state.tasks.find(t => t.id === taskId);
-      if (task) {
-        const wasDone = task.done;
-        task.done = !task.done;
-        if (!wasDone && task.done) {
-          addPoints(10);
-          checkAllTasksBonus();
-        }
-        save();
-        close();
-        render();
-      }
-    });
-  });
-}
-
-function openNotifsListModal() {
-  function renderList(modal) {
-    const list = modal.querySelector('#notifsList');
-    if (state.notifications.length === 0) {
-      list.innerHTML = '<div class="empty-state"><div class="empty-icon">🔔</div><p>Nicio notificare</p></div>';
-      return;
-    }
-    list.innerHTML = state.notifications.slice().reverse().map(n => `
-      <div class="notif-item">
-        <div class="notif-dot ${n.read ? 'read' : ''}"></div>
-        <div class="notif-body">
-          <div class="notif-text">${n.text}</div>
-          <div class="notif-time">${n.time}</div>
-        </div>
-      </div>`).join('');
-  }
-
-  const { modal, close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title">Notificari</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <button class="btn btn-secondary btn-full" id="markAllRead" style="margin-bottom:12px">Marcheaza toate citite</button>
-      <div id="notifsList"></div>
-    </div>
-  `);
-  renderList(modal);
-  modal.querySelector('#markAllRead').addEventListener('click', () => {
-    state.notifications.forEach(n => n.read = true);
-    save();
-    renderList(modal);
-    render();
-  });
-}
-
-function openEditProfileModal() {
-  const { modal, close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title">Editeaza profil</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">Nume</label>
-        <input class="form-input" id="mProfName" value="${state.profile.name}" maxlength="30"/>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Motto personal</label>
-        <textarea class="form-input" id="mProfMotto" rows="2" maxlength="100">${state.profile.motto}</textarea>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" data-close>Anuleaza</button>
-      <button class="btn btn-primary" id="mProfSave">Salveaza</button>
-    </div>
-  `);
-  modal.querySelector('#mProfSave').addEventListener('click', () => {
-    const name = modal.querySelector('#mProfName').value.trim();
-    const motto = modal.querySelector('#mProfMotto').value.trim();
-    if (!name) { toast('Scrie un nume!'); return; }
-    state.profile.name = name;
-    state.profile.motto = motto || state.profile.motto;
-    save();
-    close();
-    render();
-    toast('Profil actualizat!');
-  });
-}
-
-function openFabMenu() {
-  const { close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title">Ce vrei sa adaugi?</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="fab-sheet">
-      <div class="fab-sheet-item" class="fab-sheet-item fab-task-btn">
-        <div class="fab-sheet-icon bg-blue-dim" style="background:var(--blue-dim)">✅</div>
-        <div>
-          <div class="fab-sheet-label">Task nou</div>
-          <div class="fab-sheet-sub">Adauga un task pentru azi sau viitor</div>
-        </div>
-      </div>
-      <div class="fab-sheet-item" class="fab-sheet-item fab-habit-btn">
-        <div class="fab-sheet-icon" style="background:var(--violet-dim)">⭕</div>
-        <div>
-          <div class="fab-sheet-label">Obicei nou</div>
-          <div class="fab-sheet-sub">Adauga un obicei de urmat zilnic</div>
-        </div>
-      </div>
-      <div class="fab-sheet-item" class="fab-sheet-item fab-note-btn">
-        <div class="fab-sheet-icon" style="background:var(--green-dim)">📝</div>
-        <div>
-          <div class="fab-sheet-label">Nota rapida</div>
-          <div class="fab-sheet-sub">Noteaza ceva rapid</div>
-        </div>
-      </div>
-    </div>
-  `);
-  document.querySelector('.fab-task-btn').addEventListener('click', () => { close(); openAddTaskModal(); });
-  document.querySelector('.fab-habit-btn').addEventListener('click', () => { close(); openAddHabitModal(); });
-  document.querySelector('.fab-note-btn').addEventListener('click', () => { close(); openNotesModal(); });
-}
-// ===== ACTIONS =====
-function toggleTask(id) {
-  const task = state.tasks.find(t => t.id === id);
-  if (!task) return;
-  const wasDone = task.done;
-  task.done = !task.done;
-  if (!wasDone && task.done) {
-    addPoints(10);
-    checkAllTasksBonus();
-    addNotification(`Task finalizat: ${task.title} ✅`);
-  }
-  save();
-  render();
-}
-
-function checkAllTasksBonus() {
-  const today = todayISO();
-  const todayTasks = state.tasks.filter(t => t.date === today);
-  if (todayTasks.length > 0 && todayTasks.every(t => t.done)) {
-    addPoints(20);
-    toast('🎉 Toate task-urile azi completate! +20 puncte bonus!');
-    addNotification('Toate task-urile de azi completate! 🎉 +20 puncte bonus');
-  }
-}
-
-function toggleHabit(id) {
-  const h = state.habits.find(x => x.id === id);
-  if (!h) return;
-  const wasDone = h.done;
-  h.done = !h.done;
-  if (!wasDone && h.done) {
-    h.doneDate = todayISO();
-    h.streak = (h.streak || 0) + 1;
-    addPoints(5);
-    checkAllHabitsBonus();
-    addNotification(`Obicei bifat: ${h.title} ${h.emoji}`);
-  } else if (wasDone && !h.done) {
-    h.doneDate = null;
-    h.streak = Math.max(0, (h.streak || 1) - 1);
-    state.stats.points = Math.max(0, state.stats.points - 5);
-    save();
-  }
-  save();
-  render();
-}
-
-function checkAllHabitsBonus() {
-  if (state.habits.length > 0 && state.habits.every(h => h.done)) {
-    addPoints(15);
-    toast('🌟 Toate obiceiurile completate! +15 puncte bonus!');
-    addNotification('Toate obiceiurile de azi completate! 🌟 +15 puncte bonus');
-  }
-}
-
-function deleteTask(id) {
-  state.tasks = state.tasks.filter(t => t.id !== id);
-  cancelNotification(id);
-  save();
-  render();
-  toast('Task sters');
-}
-
-function nextQuote() {
-  state.quoteIndex = (state.quoteIndex + 1) % QUOTES.length;
-  save();
-  render();
-}
-
-function addNotification(text) {
-  if (!state.notifications) state.notifications = [];
-  state.notifications.push({
-    id: uid(),
-    text,
-    time: new Date().toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' }),
-    read: false
-  });
-  if (state.notifications.length > 50) state.notifications.shift();
-  save();
-}
-
-// ===== ONESIGNAL / PUSH =====
-function scheduleNotification(task) {
-  if (!task.time || !task.date) return;
-  const os = window.__oneSignalReady;
-  if (!os) return;
-  try {
-    const dt = new Date(`${task.date}T${task.time}:00`);
-    if (dt <= new Date()) return;
-    // Store for display — actual scheduling via OneSignal API would need backend
-    if (!state.notifications) state.notifications = [];
-    addNotification(`Programat: ${task.title} la ${task.time}`);
-  } catch (e) { /* ignore */ }
-}
-
-function cancelNotification(id) {
-  // placeholder — would cancel via OneSignal external ID
-}
-
-async function testPushNotification() {
-  const os = window.__oneSignalReady;
-  if (os) {
-    try {
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        new Notification('Dragon Life 🐉', {
-          body: 'Notificarile push functioneaza! 🎉',
-          icon: '/icon.svg'
-        });
-        toast('Notificare trimisa! 🔔');
-        addNotification('Test notificare push reusit!');
-      } else {
-        toast('Permisiune notificari refuzata');
-      }
-    } catch (e) {
-      toast('Notificarile nu sunt disponibile pe acest dispozitiv');
-    }
-  } else {
-    if ('Notification' in window) {
-      const p = await Notification.requestPermission();
-      if (p === 'granted') {
-        new Notification('Dragon Life', { body: 'Test ok! 🐉' });
-        toast('Notificare trimisa!');
-      }
-    } else {
-      toast('Notificarile nu sunt suportate');
-    }
-  }
-}
-
-// ===== EXPORT / IMPORT / RESET =====
-
-
-function confirmReset() {
-  const { modal, close } = openModal(`
-    <div class="modal-header">
-      <span class="modal-title" style="color:var(--red)">Reseteaza aplicatia</span>
-      <button class="modal-close" data-close>✕</button>
-    </div>
-    <div class="modal-body">
-      <p style="font-size:14px;color:var(--text2);margin-bottom:16px">Aceasta actiune va sterge <strong style="color:var(--text)">toate datele</strong> si nu poate fi anulata.</p>
-      <p style="font-size:13px;color:var(--text3)">Asigura-te ca ai exportat datele inainte.</p>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" data-close>Anuleaza</button>
-      <button class="btn btn-danger" id="confirmResetBtn">Da, reseteaza tot</button>
-    </div>
-  `, { center: true });
-  modal.querySelector('#confirmResetBtn').addEventListener('click', () => {
-    localStorage.removeItem(KEY);
-    state = JSON.parse(JSON.stringify(DEFAULT_STATE));
-    save();
-    close();
-    render();
-    toast('Aplicatia a fost resetata');
-  });
-}
-
-function triggerAvatarUpload() {
-  document.getElementById('avatarInput').click();
-}
-
-function handleAvatarUpload(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    state.profile.photo = ev.target.result;
-    save();
-    render();
-    toast('Avatar actualizat! 📷');
-  };
-  reader.readAsDataURL(file);
-}
-
-// ===== GLOBAL EVENT DELEGATION =====
-document.addEventListener('click', e => {
-  const el = e.target.closest('[data-act]');
-  if (!el) return;
-  const act = el.dataset.act;
-  const id = el.dataset.id;
-  const filter = el.dataset.filter;
-
-  switch (act) {
-    case 'toggleTask': toggleTask(id); break;
-    case 'toggleHabit': toggleHabit(id); break;
-    case 'deleteTask': deleteTask(id); break;
-    case 'openAddTaskModal': openAddTaskModal(); break;
-    case 'openEditTaskModal': openEditTaskModal(id); break;
-    case 'openAddHabitModal': openAddHabitModal(); break;
-    case 'openEditHabitModal': openEditHabitModal(id); break;
-    case 'openHealthModal': openHealthModal(); break;
-    case 'openStatsModal': openStatsModal(); break;
-    case 'openScoreModal': openScoreModal(); break;
-    case 'openCalendarModal': openCalendarModal(); break;
-    case 'openNotesModal': openNotesModal(); break;
-    case 'openPlanDayModal': openPlanDayModal(); break;
-    case 'openNotifsListModal': openNotifsListModal(); break;
-    case 'openEditProfileModal': openEditProfileModal(); break;
-    case 'openFabMenu': openFabMenu(); break;
-    case 'filterTasks':
-      tasksFilter = filter;
-      render();
-      break;
-    case 'nextQuote': nextQuote(); break;
-    case 'deleteNote': {
-      state.notes = state.notes.filter(x => x.id !== id);
-      save();
-      render();
-      break;
-    }
-    case 'cycleTaskSort': {
-      tasksSort = tasksSort === 'time-asc' ? 'time-desc' : tasksSort === 'time-desc' ? 'done' : 'time-asc';
-      render();
-      break;
-    }
-    case 'openAddPlanModal': openAddPlanModal(); break;
-    case 'openPlanDay': openAddPlanModal(el.dataset.date); break;
-    case 'deletePlanEvent': deletePlanEvent(id); break;
-    case 'planPrevMonth': {
-      const [yr, mo] = planViewMonth.split('-').map(Number);
-      const prev = new Date(yr, mo - 2, 1);
-      planViewMonth = prev.getFullYear() + '-' + String(prev.getMonth() + 1).padStart(2,'0');
-      render();
-      break;
-    }
-    case 'planNextMonth': {
-      const [yr, mo] = planViewMonth.split('-').map(Number);
-      const next = new Date(yr, mo, 1);
-      planViewMonth = next.getFullYear() + '-' + String(next.getMonth() + 1).padStart(2,'0');
-      render();
-      break;
-    }
-    case 'goNotes': setTab('notes'); break;
-    case 'goPlan': setTab('plan'); break;
-    case 'goProfile': setTab('profile'); break;
-    case 'goTasks': setTab('tasks'); break;
-    case 'goHabits': setTab('habits'); break;
-    case 'confirmReset': confirmReset(); break;
-    case 'testPushNotification': testPushNotification(); break;
-    case 'triggerAvatarUpload': triggerAvatarUpload(); break;
-    case 'handleAvatarUpload': handleAvatarUpload(e); break;
-  }
-});
-
-document.addEventListener('change', e => {
-  if (e.target.id === 'avatarInput') handleAvatarUpload(e);
-});
-
-// Nav tab clicks
-document.querySelectorAll('.nav-btn[data-tab]').forEach(btn => {
-  btn.addEventListener('click', () => setTab(btn.dataset.tab));
-});
-
-// FAB handled via data-act delegation above
-
-document.addEventListener('click', e => {
-  const btn = e.target.closest('#noteAddBtn');
-  if (!btn) return;
-  const ta = document.getElementById('noteCompose');
-  const text = ta ? ta.value.trim() : '';
-  if (!text) return;
-  state.notes.push({ id: uid(), text, date: todayISO() });
-  save();
-  render();
-});
-
-// ===== SWIPE NAVIGATION =====
-const TABS = ['dashboard', 'tasks', 'habits', 'notes', 'plan', 'profile'];
-let swipeStartX = 0, swipeStartY = 0, swipeActive = false;
-
-document.addEventListener('touchstart', e => {
-  const t = e.touches[0];
-  swipeStartX = t.clientX;
-  swipeStartY = t.clientY;
-  swipeActive = true;
-}, { passive: true });
-
-document.addEventListener('touchmove', e => {
-  if (!swipeActive) return;
-  const dx = e.touches[0].clientX - swipeStartX;
-  const dy = e.touches[0].clientY - swipeStartY;
-  if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 10) {
-    const modalRoot = document.getElementById('modalRoot');
-    if (modalRoot && modalRoot.children.length > 0) return;
-    e.preventDefault();
-  }
-}, { passive: false });
-
-document.addEventListener('touchend', e => {
-  if (!swipeActive) return;
-  swipeActive = false;
-  const dx = e.changedTouches[0].clientX - swipeStartX;
-  const dy = e.changedTouches[0].clientY - swipeStartY;
-  if (Math.abs(dx) < Math.abs(dy) || Math.abs(dx) < 50) return;
-  const modalRoot = document.getElementById('modalRoot');
-  if (modalRoot && modalRoot.children.length > 0) {
-    if (dx > 0) closeAllModals();
-    return;
-  }
-  const idx = TABS.indexOf(state.currentTab);
-  if (dx < 0 && idx < TABS.length - 1) setTab(TABS[idx + 1]);
-  if (dx > 0 && idx > 0) setTab(TABS[idx - 1]);
-}, { passive: true });
-
-// ===== INIT =====
-document.addEventListener('DOMContentLoaded', () => {
-  load();
-  ensureHealthDay();
-  ensureHabitsDay();
-  updateStreak();
-  setTab(state.currentTab || 'dashboard');
-  checkNightMode();
-  setInterval(checkNightMode, 60000);
-});

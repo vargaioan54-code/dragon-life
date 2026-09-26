@@ -9,7 +9,9 @@ const ASSETS = [
   './styles.css',
   './app.js',
   './manifest.webmanifest',
-  './icon.svg'
+  './icon.svg',
+  './assets/avatar.jpg',
+  './assets/mountain.svg'
 ];
 
 self.addEventListener('install', e => {
