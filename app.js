@@ -552,12 +552,6 @@ VIEWS.dashboard = function() {
     </div>`;
   }).join('')}
 
-  <div class="card">
-    <div class="card-head"><h3>Progres obiceiuri</h3><span class="chip">${e.habits_done.length}/${activeHabits}</span></div>
-    <div class="pbar amber"><i style="width:${(habitsPct*100).toFixed(0)}%"></i></div>
-    <div class="subtitle mt-6">${Math.round(habitsPct * 100)}% din obiceiurile active</div>
-  </div>
-
   `;
 };
 
