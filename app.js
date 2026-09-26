@@ -352,6 +352,7 @@ const ICONS = {
   water:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3s6 7 6 11a6 6 0 0 1-12 0c0-4 6-11 6-11z"/></svg>`,
   meal:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16M4 4c4 0 6 3 6 6s-2 4-6 4"/><path d="M15 3v18M18 3v5a3 3 0 0 1-3 3"/></svg>`,
   book:    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h13a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z"/></svg>`,
+  smoke:   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="14" width="14" height="4" rx="1"/><path d="M17 14v4M20 14v4M10 10c0-2 2-2 2-4M14 10c0-2 2-2 2-4"/></svg>`,
 };
 
 // ─── router ─────────────────────────────────────────────────────────────────
@@ -373,6 +374,7 @@ const VIEW_TITLES = {
   routine_noon: 'Rutina de amiază',
   routine_evening: 'Rutina de seară',
   sleep: 'Somn',
+  smoking: 'Fumat',
   mood: 'Stare zilnică',
   nutrition: 'Nutriție',
   activity: 'Activitate',
@@ -469,6 +471,7 @@ VIEWS.dashboard = function() {
   const moodTxt = e.mood ? moodLabel(e.mood.rating) : '—';
   const steps  = e.activity ? e.activity.steps.toLocaleString('ro-RO') : '0';
   const kcal   = e.nutrition && e.nutrition.totals ? e.nutrition.totals.kcal : 0;
+  const smokingCount = e.smoking && e.smoking.entries ? e.smoking.entries.length : 0;
   const hr = new Date().getHours();
   const greet = hr < 5 ? 'Noapte liniștită' : hr < 12 ? 'Bună dimineața' : hr < 18 ? 'Bună ziua' : 'Bună seara';
   const isEmpty = !state.routine_items.length && !state.habits.length && !e.sleep && !e.mood && !e.nutrition && !e.activity && !state.custom_cards.length;
@@ -494,28 +497,14 @@ VIEWS.dashboard = function() {
 
   <div class="grid-2 mt-14">
     <div class="metric card tap" data-view="sleep">
-      <div class="row"><div class="m-icon blue">${ICONS.moon}</div><div class="chip ${sq.tone}">${sq.label}</div></div>
+      <div class="m-icon blue">${ICONS.moon}</div>
       <div class="m-label">Somn</div>
       <div class="m-value">${sleepH}</div>
-      <div class="m-sub">Calitate ${sq.label.toLowerCase()}</div>
     </div>
-    <div class="metric card tap" data-view="mood">
-      <div class="row"><div class="m-icon amber">${ICONS.bolt}</div><div class="chip amber">${energy}%</div></div>
-      <div class="m-label">Energie</div>
-      <div class="m-value">${energy}%</div>
-      <div class="m-sub">Ridicată</div>
-    </div>
-    <div class="metric card tap" data-view="mood">
-      <div class="row"><div class="m-icon green">${ICONS.smile}</div><div class="chip green">${moodTxt}</div></div>
-      <div class="m-label">Stare</div>
-      <div class="m-value">${moodTxt}</div>
-      <div class="m-sub">Stabilă</div>
-    </div>
-    <div class="metric card tap" data-view="activity">
-      <div class="row"><div class="m-icon purple">${ICONS.activity}</div><div class="chip purple">${steps}</div></div>
-      <div class="m-label">Activitate</div>
-      <div class="m-value">${steps}</div>
-      <div class="m-sub">pași</div>
+    <div class="metric card tap" data-view="smoking">
+      <div class="m-icon red">${ICONS.smoke}</div>
+      <div class="m-label">Fumat</div>
+      <div class="m-value">${smokingCount}</div>
     </div>
   </div>
 
@@ -602,6 +591,27 @@ function routineViewForSlot(slot) {
 VIEWS.routine         = routineViewForSlot('morning');
 VIEWS.routine_noon    = routineViewForSlot('noon');
 VIEWS.routine_evening = routineViewForSlot('evening');
+
+// —— Fumat (simplu) ——
+VIEWS.smoking = function() {
+  const e = todayEntry();
+  const count = (e.smoking && e.smoking.entries) ? e.smoking.entries.length : 0;
+  const startedApp = isStarted();
+  return `
+  <div class="row" style="gap:10px">
+    <button class="icon-btn" data-action="back">${ICONS.back}</button>
+    <div style="flex:1"></div>
+    <div style="width:40px"></div>
+  </div>
+
+  <div class="card" style="text-align:center;padding:28px 18px">
+    <div class="big" style="color:var(--red);font-size:56px">${count}</div>
+    <div class="subtitle mt-6">azi</div>
+    <button class="btn primary block mt-14" data-action="smoke-log" ${!startedApp ? 'disabled' : ''}>${ICONS.plus}<span>+1</span></button>
+    ${count ? `<button class="btn ghost block" data-action="smoke-undo" style="margin-top:6px">Anulează</button>` : ''}
+  </div>
+  `;
+};
 
 // —— Somn ——
 function sleepLiveDuration() {
@@ -1458,6 +1468,24 @@ function openRoutineModal(editId, defaultSlot) {
 // —— Sleep actions ——
 ACTIONS['sleep-tab'] = (el) => { viewState.tab = el.dataset.tab; render(); };
 ACTIONS['add-sleep'] = () => openSleepModal();
+
+// —— Smoking ——
+ACTIONS['smoke-log'] = () => {
+  if (!requireStarted()) return;
+  const e = todayEntry();
+  if (!e.smoking) e.smoking = { entries: [] };
+  if (!e.smoking.entries) e.smoking.entries = [];
+  e.smoking.entries.push({ ts: Date.now() });
+  save();
+  toast(`țigară #${e.smoking.entries.length}`);
+  render();
+};
+ACTIONS['smoke-undo'] = () => {
+  const e = todayEntry();
+  if (!e.smoking || !e.smoking.entries || !e.smoking.entries.length) return;
+  e.smoking.entries.pop();
+  save(); toast('Anulat'); render();
+};
 
 ACTIONS['sleep-bed'] = () => {
   if (!requireStarted()) return;
