@@ -28,19 +28,60 @@ const STORAGE_KEY = 'dragon_life_v1';
 
 const DEFAULT_ROUTINE_ITEMS = []; // empty — user builds their own
 
+// Curated pool of quotes with psychological tags (RO). User likes/dislikes,
+// app reads dominant tags + average energy to infer mood.
+const QUOTES = [
+  { text: 'Fericirea nu e ceva de-a gata. Vine din propriile tale acțiuni.',                  author: 'Dalai Lama',        tags: ['motivat','calm','acțiune'],    energy: 70 },
+  { text: 'Nu putem controla vântul, dar putem regla pânzele.',                                 author: 'Aristotel',          tags: ['adaptare','calm','curajos'],    energy: 65 },
+  { text: 'Cine îți cunoaște umbra, își cunoaște lumina.',                                    author: 'Carl Jung',          tags: ['reflexiv','profund'],           energy: 45 },
+  { text: 'Cel mai bun moment să plantezi un copac a fost acum 20 de ani. Al doilea, e azi.',    author: 'Proverb chinezesc',  tags: ['motivat','acțiune','curajos'], energy: 80 },
+  { text: 'Nu contează cât de încet mergi, atâta timp cât nu te oprești.',                        author: 'Confucius',          tags: ['perseverență','calm'],         energy: 60 },
+  { text: 'Universul nu se grăbește; și totuși, totul se îndeplinește.',                        author: 'Lao Tzu',            tags: ['calm','răbdare','reflexiv'],   energy: 40 },
+  { text: 'Fii tu însuți. Toți ceilalți sunt deja luați.',                                       author: 'Oscar Wilde',        tags: ['curajos','autentic'],           energy: 75 },
+  { text: 'Viața e 10% ce se întâmplă și 90% cum reacționezi.',                                  author: 'Charles Swindoll',   tags: ['acțiune','reflexiv'],           energy: 70 },
+  { text: 'Cea mai grea bătălie e între cine ești și cine vrei să fii.',                          author: '—',                   tags: ['profund','motivat','curajos'],  energy: 65 },
+  { text: 'Respiră. E doar o zi grea, nu o viață grea.',                                          author: '—',                   tags: ['calm','recunoscător'],          energy: 50 },
+  { text: 'Recunoștința transformă puținul în suficient.',                                       author: '—',                   tags: ['recunoscător','calm'],           energy: 60 },
+  { text: 'Când nu poți controla ce se întâmplă, controlează cum răspunzi.',                       author: 'Epictet',            tags: ['calm','adaptare','curajos'],    energy: 65 },
+  { text: 'Cel care are un DE CE poate suporta aproape orice CUM.',                                author: 'Nietzsche',          tags: ['motivat','profund','curajos'],  energy: 80 },
+  { text: 'Liniștea e vocea Dumnezeirii.',                                                        author: 'Rumi',               tags: ['calm','reflexiv','profund'],    energy: 35 },
+  { text: 'Cine se trezește devreme prinde ziua.',                                                author: 'Proverb',            tags: ['motivat','acțiune'],            energy: 85 },
+  { text: 'Fericirea e un drum, nu o destinație.',                                                author: 'Buddha',             tags: ['calm','reflexiv','recunoscător'],energy: 55 },
+  { text: 'Nu am fost triști pentru că nu am avut. Am fost triști pentru că nu am observat.',      author: '—',                   tags: ['reflexiv','recunoscător'],       energy: 45 },
+  { text: 'Ai grijă de corp — e singurul loc în care trebuie să trăiești.',                        author: 'Jim Rohn',           tags: ['acțiune','recunoscător'],       energy: 70 },
+  { text: 'Când nu știi ce să faci, fă următorul lucru corect.',                                  author: '—',                   tags: ['acțiune','curajos'],             energy: 65 },
+  { text: 'Un zbor de o mie de mile începe cu un singur pas.',                                    author: 'Lao Tzu',            tags: ['motivat','răbdare','curajos'],  energy: 75 },
+  { text: 'Nu te compara cu alții. Compară-te cu cine erai ieri.',                                author: 'Jordan Peterson',    tags: ['reflexiv','motivat'],           energy: 65 },
+  { text: 'Blândețea e forță sub control.',                                                       author: '—',                   tags: ['calm','profund','curajos'],     energy: 55 },
+  { text: 'Fă azi ce alții nu vor, pentru a trăi mâine cum alții nu pot.',                          author: 'Jerry Rice',         tags: ['motivat','acțiune'],            energy: 90 },
+  { text: 'Zaharul și somnul sunt dușmani. Odihna și legumele sunt prieteni.',                     author: '—',                   tags: ['acțiune','recunoscător'],       energy: 60 },
+  { text: 'Cel mai liniștit spirit are cea mai clară vedere.',                                     author: '—',                   tags: ['calm','reflexiv','profund'],    energy: 40 },
+  { text: 'Încrederea nu vine din a avea toate răspunsurile, ci din a fi deschis la orice întrebare.', author: '—',                tags: ['curajos','reflexiv'],           energy: 65 },
+  { text: 'Suferința trece. Faptul că ai supraviețuit rămâne.',                                    author: '—',                   tags: ['curajos','profund'],            energy: 55 },
+  { text: 'Puţin câte puțin, pas cu pas.',                                                          author: 'Proverb',            tags: ['calm','răbdare'],                energy: 50 },
+  { text: 'Alege pacea în locul dreptului de a avea dreptate.',                                   author: '—',                   tags: ['calm','profund'],               energy: 45 },
+  { text: 'Fii apa. Curge, adaptează-te, răbdă.',                                                author: 'Bruce Lee',          tags: ['calm','adaptare','profund'],    energy: 50 },
+];
+
 const DEFAULT_HABITS = []; // empty — user builds their own
 
 const DEFAULT_RELAX = []; // empty — user adds their own exercises
 
+const DATA_VERSION = 'v2';
+
 const DEFAULT_STATE = {
   goals: { steps: 10000, water_ml: 2500, sleep_hours: 8, kcal: 2200, protein: 150, carbs: 270, fat: 70, stress_max: 50 },
-  prefs: { notifications: true, morning_reminder: '07:30', sleep_reminder: '22:30' },
+  prefs: {
+    notifications: true,
+    bedtime: '22:00',          // alarmă culcare — auto-logează sleep.bedtime pe ziua următoare
+    wakeup:  '08:00',          // alarmă trezire — auto-logează sleep.wakeup pe ziua curentă
+  },
   routine_items: [],
   habits: [],
   relax_items: [],
   custom_cards: [],         // user-built Dashboard cards
   entries: {},              // { isoDate: { sleep, mood, nutrition, activity, routine, journal, habits_done } }
-  meta: { last_seen: todayISO(), streak_days: 1, created_at: todayISO() },
+  meta: { last_seen: todayISO(), streak_days: 1, created_at: todayISO(), data_version: DATA_VERSION },
   notifs: [],
 };
 
@@ -63,6 +104,23 @@ function load() {
     if (!merged.entries) merged.entries = {};
     if (!merged.notifs) merged.notifs = [];
     if (!merged.custom_cards) merged.custom_cards = [];
+    if (!merged.meta) merged.meta = { last_seen: todayISO(), streak_days: 1, created_at: todayISO(), data_version: DATA_VERSION };
+    // One-time cleanup of the old seeded demo dataset
+    if (merged.meta.data_version !== DATA_VERSION) {
+      merged.entries = {};
+      merged.routine_items = merged.routine_items.filter(it => !/^r(1[0-4]|[1-9])$/.test(it.id));
+      merged.habits        = merged.habits.filter(h => !/^h[1-6]$/.test(h.id));
+      merged.relax_items   = merged.relax_items.filter(x => !/^x[1-4]$/.test(x.id));
+      merged.meta.data_version = DATA_VERSION;
+      merged.meta.created_at = todayISO();
+    }
+    // Migrate legacy reminder keys
+    if (merged.prefs.morning_reminder && !merged.prefs.wakeup)  merged.prefs.wakeup  = merged.prefs.morning_reminder;
+    if (merged.prefs.sleep_reminder   && !merged.prefs.bedtime) merged.prefs.bedtime = merged.prefs.sleep_reminder;
+    delete merged.prefs.morning_reminder;
+    delete merged.prefs.sleep_reminder;
+    if (!merged.prefs.bedtime) merged.prefs.bedtime = '22:00';
+    if (!merged.prefs.wakeup)  merged.prefs.wakeup  = '08:00';
     return merged;
   } catch (e) { return structuredClone(DEFAULT_STATE); }
 }
@@ -645,10 +703,58 @@ VIEWS.sleep = function() {
 };
 
 // —— Stare zilnică ——
+function getQuotePool() {
+  const e = todayEntry();
+  const shown = new Set((e.quote_reactions || []).map(r => r.qi));
+  const pool = QUOTES.map((_, i) => i).filter(i => !shown.has(i));
+  if (pool.length < 3) return QUOTES.map((_, i) => i); // reshuffle
+  // deterministic per-day random subset of 5
+  const seed = parseInt(todayISO().replace(/-/g, ''), 10);
+  const rng = (n) => (seed * (n+1) * 9301 + 49297) % 233280;
+  return pool.sort((a,b) => rng(a) - rng(b)).slice(0, 5);
+}
+function moodReading(e) {
+  const reactions = e.quote_reactions || [];
+  const liked = reactions.filter(r => r.like);
+  if (liked.length < 2) return null;
+  const tagCount = {};
+  let energySum = 0;
+  liked.forEach(r => {
+    const q = QUOTES[r.qi];
+    if (!q) return;
+    energySum += q.energy;
+    q.tags.forEach(t => tagCount[t] = (tagCount[t] || 0) + 1);
+  });
+  const dominant = Object.entries(tagCount).sort((a,b) => b[1] - a[1]).slice(0, 3);
+  const inferredEnergy = Math.round(energySum / liked.length);
+  const readings = {
+    'calm':          'Îi cauți liniștea — ești în echilibru interior.',
+    'motivat':       'Ai foc în tine. Ești gata să acționezi.',
+    'reflexiv':      'Ești într-un mod de contemplare, ți analizezi viața.',
+    'acțiune':       'Vrei mișcare, să construiești ceva.',
+    'curajos':       'Ești în modul "pot orice" — curaj și determinare.',
+    'profund':       'Căuți sens, răspunsuri mari.',
+    'recunoscător':  'Apreciezi ce ai — stare de recunoștință.',
+    'răbdare':       'Accepți ritmul lucrurilor — nu forțezi.',
+    'adaptare':      'Ești flexibil, gata să te adaptezi.',
+    'autentic':      'Cauți să fii tu însuți fără compromisuri.',
+    'perseverență':  'Nu te oprești — dedicație constantă.',
+  };
+  return {
+    energy: inferredEnergy,
+    tags: dominant.map(([t, c]) => ({ tag: t, count: c, msg: readings[t] || '' })),
+    likedCount: liked.length,
+  };
+}
+
 VIEWS.mood = function() {
   const iso = todayISO();
   const e = getEntry(iso);
   const cur = e.mood || { rating: 3, energy: 60, stress: 40, note: '' };
+  const quotePool = getQuotePool();
+  const reactions = e.quote_reactions || [];
+  const reactedIds = new Set(reactions.map(r => r.qi));
+  const reading = moodReading(e);
   return `
   <div class="row" style="gap:10px">
     <button class="icon-btn" data-action="back">${ICONS.back}</button>
@@ -681,6 +787,44 @@ VIEWS.mood = function() {
   </div>
 
   <button class="btn primary block" data-action="mood-save">Salvează</button>
+
+  <div class="section-title"><h2>Citate care rezonează cu tine</h2></div>
+  <p class="subtitle mb-10">Dă ❤️ la ce simți, ✕ la ce nu. După câteva reacții app-ul îți citește starea.</p>
+  ${quotePool.filter(qi => !reactedIds.has(qi)).map(qi => {
+    const q = QUOTES[qi];
+    return `<div class="card quote">
+      <div style="font-size:15px;line-height:1.45;color:var(--text)">„${esc(q.text)}”</div>
+      <div class="subtitle mt-6">— ${esc(q.author)}</div>
+      <div class="row" style="gap:8px;margin-top:12px;justify-content:flex-end">
+        <button class="btn ghost" data-action="quote-react" data-qi="${qi}" data-like="0">${ICONS.close}<span>Nu</span></button>
+        <button class="btn primary" data-action="quote-react" data-qi="${qi}" data-like="1">${ICONS.heart}<span>Rezonează</span></button>
+      </div>
+    </div>`;
+  }).join('') || `<div class="empty"><div class="em-emoji">🌟</div><div class="em-title">Ai reacționat la toate azi</div><div class="em-hint">Mai vin altele mâine.</div></div>`}
+
+  ${reading ? `
+    <div class="section-title"><h2>Citirea stării tale</h2><span class="chip green">${reading.likedCount} rezonanțe</span></div>
+    <div class="card">
+      <div class="row" style="gap:12px;align-items:flex-start">
+        <div class="m-icon amber">${ICONS.bolt}</div>
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:14px">Nivel energie inferat</div>
+          <div class="subtitle">${reading.energy}% — pe baza citatelor care rezonează</div>
+          <div class="pbar mt-6"><i style="width:${reading.energy}%"></i></div>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div style="font-weight:600;font-size:13px;margin-bottom:6px">Stările care te definesc azi</div>
+      ${reading.tags.map(t => `<div style="padding:6px 0">
+        <div class="spread"><span class="chip purple" style="text-transform:capitalize">${esc(t.tag)}</span><span class="subtitle">×${t.count}</span></div>
+        ${t.msg ? `<div class="subtitle mt-6">${esc(t.msg)}</div>` : ''}
+      </div>`).join('')}
+      <button class="btn ghost block mt-10" data-action="apply-reading">${ICONS.check}<span>Aplică pe slidere</span></button>
+      <button class="btn ghost block" data-action="reset-quotes" style="margin-top:6px">${ICONS.trash}<span>Șterge reacțiile</span></button>
+    </div>
+  ` : reactions.length > 0 ? `
+    <div class="card"><div class="subtitle">Mai dă ❤️ la încă ${Math.max(1, 2 - (reading ? reading.likedCount : reactions.filter(r=>r.like).length))} citate ca să pot citi starea.</div></div>
+  ` : ''}
 
   <div class="section-title"><h2>Istoric</h2></div>
   <div class="card">
@@ -1328,6 +1472,37 @@ ACTIONS['mood-save'] = () => {
   save(); toast('Salvat ✓');
   notify('Stare zilnică salvată', `${moodLabel(cur.rating)} · energie ${cur.energy}%`);
 };
+ACTIONS['quote-react'] = (el) => {
+  const qi = parseInt(el.dataset.qi, 10);
+  const like = el.dataset.like === '1';
+  const e = todayEntry();
+  if (!e.quote_reactions) e.quote_reactions = [];
+  e.quote_reactions.push({ qi, like, ts: Date.now() });
+  save();
+  toast(like ? 'Notat: rezonează ❤' : 'Notat');
+  render();
+};
+ACTIONS['apply-reading'] = () => {
+  const e = todayEntry();
+  const r = moodReading(e);
+  if (!r) return;
+  const cur = e.mood || { rating: 3, energy: r.energy, stress: 40, note: '' };
+  cur.energy = r.energy;
+  // higher inferred energy usually means lower stress
+  cur.stress = clamp(100 - r.energy - 10, 0, 100);
+  // map dominant tag to mood rating
+  const top = r.tags[0] ? r.tags[0].tag : '';
+  if (['recunoscător','motivat','curajos','acțiune'].includes(top)) cur.rating = 4;
+  else if (['calm','autentic','adaptare','perseverență'].includes(top)) cur.rating = 3;
+  else if (['reflexiv','profund','răbdare'].includes(top)) cur.rating = 3;
+  e.mood = cur;
+  save(); toast('Aplicat pe slidere'); render();
+};
+ACTIONS['reset-quotes'] = () => {
+  const e = todayEntry();
+  e.quote_reactions = [];
+  save(); toast('Reacții șterse'); render();
+};
 
 // —— Nutrition actions ——
 ACTIONS['nut-prev'] = () => { const cur = viewState.date || todayISO(); viewState.date = isoOffset(-1, cur); render(); };
@@ -1660,25 +1835,40 @@ ACTIONS['edit-goals'] = () => {
 };
 ACTIONS['edit-notifs'] = () => {
   const p = state.prefs;
+  const permTxt = ('Notification' in window)
+    ? (Notification.permission === 'granted' ? '<span class="chip green">Permisiune acordată</span>'
+      : Notification.permission === 'denied' ? '<span class="chip red">Blocate din browser</span>'
+      : '<span class="chip amber">Neactivate</span>')
+    : '<span class="chip red">Neacceptate</span>';
   openModal(`
-    <div class="modal-head"><h3>Mementouri</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
-    <div class="field"><label>Rutina de dimineață</label><input class="input" id="nM" type="time" value="${p.morning_reminder}"/></div>
-    <div class="field"><label>Somn</label><input class="input" id="nS" type="time" value="${p.sleep_reminder}"/></div>
-    <div class="row" style="gap:8px;margin-top:10px">
-      <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text-mid)">
-        <input type="checkbox" id="nOn" ${p.notifications ? 'checked' : ''}/> Activate
-      </label>
+    <div class="modal-head"><h3>Alarme &amp; mementouri</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
+    <p class="subtitle" style="margin-bottom:10px">La ora setată sună telefonul și somnul se logează automat.</p>
+    <div class="grid-2">
+      <div class="field"><label>🌙 Culcare (bedtime)</label><input class="input" id="nB" type="time" value="${p.bedtime}"/></div>
+      <div class="field"><label>☀️ Trezire (wakeup)</label><input class="input" id="nW" type="time" value="${p.wakeup}"/></div>
     </div>
-    <button class="btn primary block" id="nSave" style="margin-top:12px">Salvează</button>
+    <div class="card" style="padding:10px 12px;margin:6px 0 12px">
+      <div class="spread"><label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" id="nOn" ${p.notifications ? 'checked' : ''}/> Alarme active</label>${permTxt}</div>
+    </div>
+    <button class="btn ghost block" id="nTest">${ICONS.bell}<span>Test notificare</span></button>
+    <button class="btn primary block" id="nSave" style="margin-top:8px">Salvează</button>
   `);
   $('#nSave').onclick = async () => {
-    p.morning_reminder = $('#nM').value;
-    p.sleep_reminder = $('#nS').value;
+    p.bedtime = $('#nB').value || '22:00';
+    p.wakeup  = $('#nW').value || '08:00';
     p.notifications = $('#nOn').checked;
-    if (p.notifications && 'Notification' in window && Notification.permission !== 'granted') {
+    if (p.notifications && 'Notification' in window && Notification.permission === 'default') {
       try { await Notification.requestPermission(); } catch (e) {}
     }
-    save(); closeModal(); toast('Mementouri salvate');
+    save(); closeModal(); toast('Alarme salvate — culcare ' + p.bedtime + ' · trezire ' + p.wakeup);
+  };
+  $('#nTest').onclick = async () => {
+    if ('Notification' in window) {
+      if (Notification.permission === 'default') { try { await Notification.requestPermission(); } catch (e) {} }
+      if (Notification.permission === 'granted') {
+        new Notification('Dragon Life', { body: 'Notificările funcționează ✅', icon: 'icon.svg' });
+      } else toast('Permite notificările din setul telefonului');
+    }
   };
 };
 ACTIONS['devices'] = () => openInfoModal('Dispozitive conectate',
@@ -1773,20 +1963,58 @@ function updateStreak() {
   }
 }
 
+function minutesBetween(a, b) {
+  // wrap: if b < a, add 24h
+  const [ah, am] = a.split(':').map(Number);
+  const [bh, bm] = b.split(':').map(Number);
+  let diff = (bh * 60 + bm) - (ah * 60 + am);
+  if (diff <= 0) diff += 24 * 60;
+  return diff;
+}
+function autoLogBedtime() {
+  // Called on bedtime alarm. Attach bedtime to TOMORROW's entry (day of wakeup).
+  const tomorrow = isoOffset(1);
+  const e = getEntry(tomorrow);
+  if (!e.sleep) e.sleep = {};
+  e.sleep.bedtime = state.prefs.bedtime;
+  save();
+}
+function autoLogWakeup() {
+  // Called on wakeup alarm. Attach wakeup to TODAY's entry, compute totals.
+  const iso = todayISO();
+  const e = getEntry(iso);
+  if (!e.sleep) e.sleep = { bedtime: state.prefs.bedtime };
+  e.sleep.wakeup = state.prefs.wakeup;
+  if (!e.sleep.bedtime) e.sleep.bedtime = state.prefs.bedtime;
+  const total = minutesBetween(e.sleep.bedtime, e.sleep.wakeup);
+  e.sleep.total_min = total;
+  e.sleep.deep_min  = Math.round(total * 0.22);
+  e.sleep.rem_min   = Math.round(total * 0.20);
+  e.sleep.light_min = total - e.sleep.deep_min - e.sleep.rem_min;
+  e.sleep.awakenings = e.sleep.awakenings ?? 1;
+  save();
+}
 function localReminderTick() {
-  if (!state.prefs.notifications || !('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!state.prefs.notifications) return;
   const now = new Date();
   const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
   const key = todayISO() + ':' + hhmm;
   if (state.meta.last_notif === key) return;
-  if (hhmm === state.prefs.morning_reminder) {
-    new Notification('Rutina de dimineață', { body: 'Începe ziua cu calm și intenție.' });
-    notify('Rutina de dimineață', 'E timpul să începi ziua cu calm.');
+  const canNotify = 'Notification' in window && Notification.permission === 'granted';
+  if (hhmm === state.prefs.bedtime) {
+    autoLogBedtime();
+    if (canNotify) new Notification('🌙 E ora de somn', { body: 'Culcarea a fost înregistrată automat. Noapte bună!', icon: 'icon.svg' });
+    notify('Timp de somn', `Culcare înregistrată la ${state.prefs.bedtime}. Noapte bună!`);
     state.meta.last_notif = key; save();
-  } else if (hhmm === state.prefs.sleep_reminder) {
-    new Notification('Timp de somn', { body: 'Pregătește-te pentru un somn odihnitor.' });
-    notify('Timp de somn', 'Pregătește-te pentru un somn odihnitor.');
+    if (currentView === 'dashboard' || currentView === 'sleep') render();
+  } else if (hhmm === state.prefs.wakeup) {
+    autoLogWakeup();
+    const e = todayEntry();
+    const totalTxt = e.sleep && e.sleep.total_min ? fmtDur(e.sleep.total_min) : '';
+    if (canNotify) new Notification('☀️ Bună dimineața!', { body: `Trezire înregistrată. Ai dormit ${totalTxt}.`, icon: 'icon.svg' });
+    notify('Trezire', `Trezire înregistrată la ${state.prefs.wakeup} · dormit ${totalTxt}.`);
     state.meta.last_notif = key; save();
+    if (currentView === 'dashboard' || currentView === 'sleep') render();
   }
 }
 
