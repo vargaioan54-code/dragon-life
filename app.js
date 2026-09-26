@@ -81,9 +81,16 @@ const DEFAULT_STATE = {
   relax_items: [],
   custom_cards: [],         // user-built Dashboard cards
   entries: {},              // { isoDate: { sleep, mood, nutrition, activity, routine, journal, habits_done } }
-  meta: { last_seen: todayISO(), streak_days: 1, created_at: todayISO(), data_version: DATA_VERSION },
+  meta: { last_seen: todayISO(), streak_days: 1, created_at: todayISO(), data_version: DATA_VERSION, started_at: null },
   notifs: [],
 };
+
+function isStarted() { return !!(state.meta && state.meta.started_at); }
+function requireStarted() {
+  if (isStarted()) return true;
+  toast('Apasă „Pornește” în Setări ca să începi contorizarea');
+  return false;
+}
 
 let state = null;
 
@@ -465,9 +472,24 @@ VIEWS.dashboard = function() {
   const greet = hr < 5 ? 'Noapte liniștită' : hr < 12 ? 'Bună dimineața' : hr < 18 ? 'Bună ziua' : 'Bună seara';
   const isEmpty = !state.routine_items.length && !state.habits.length && !e.sleep && !e.mood && !e.nutrition && !e.activity && !state.custom_cards.length;
 
+  const started = isStarted();
+
   return `
   <h1>${greet}! 👋</h1>
-  <p class="subtitle">${isEmpty ? 'Personalizează app-ul după tine. Adaugă orice secțiune cu +' : 'Ai grijă de tine, în fiecare zi.'}</p>
+  <p class="subtitle">${!started ? 'Configurează app-ul, apoi apasă Pornește în Setări.' : isEmpty ? 'Personalizează app-ul după tine. Adaugă orice secțiune cu +' : 'Ai grijă de tine, în fiecare zi.'}</p>
+
+  ${!started ? `
+    <div class="card" style="border-color:var(--green);background:linear-gradient(135deg,rgba(34,197,94,.12),rgba(34,197,94,.03))">
+      <div class="row" style="gap:12px;align-items:flex-start">
+        <div class="m-icon">${ICONS.play}</div>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:15px">Contorizarea e oprită</div>
+          <div class="subtitle mt-6">Configurează obiceiurile, rutinele, orele de somn — apoi apasă <b>Pornește</b> în Setări. De atunci, totul se va înregistra doar cu date reale.</div>
+        </div>
+      </div>
+      <button class="btn primary block mt-10" data-view="settings">${ICONS.play}<span>Deschide Setări</span></button>
+    </div>
+  ` : ''}
 
   <div class="balance-hero mt-14">
     <div class="ring" style="width:88px;height:88px">
@@ -558,7 +580,7 @@ VIEWS.dashboard = function() {
     </div>
   `}
 
-  ${Object.keys(state.entries).length > 0 ? `
+  ${started && Object.keys(state.entries).length > 0 ? `
   <div class="section-title"><h2>Ultimele 7 zile</h2><button class="link" data-view="progress">Progres complet</button></div>
   <div class="card">
     <div class="spread"><div class="subtitle">Scor de echilibru</div><div class="chip green">${bal}</div></div>
@@ -1265,12 +1287,39 @@ VIEWS.stats = function() {
 
 // —— Setări ——
 VIEWS.settings = function() {
+  const started = isStarted();
+  const sdate = started ? state.meta.started_at : null;
+  const sinceTxt = sdate ? fmtDateFull(sdate.slice(0,10)) : '';
   return `
   <div class="row" style="gap:10px">
     <button class="icon-btn" data-action="back">${ICONS.back}</button>
     <div style="flex:1"></div>
     <div style="width:40px"></div>
   </div>
+
+  ${started ? `
+    <div class="card" style="border-color:var(--green);background:linear-gradient(135deg,rgba(34,197,94,.1),transparent)">
+      <div class="row" style="gap:12px">
+        <div class="m-icon">${ICONS.check}</div>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:14px">Contorizare activă</div>
+          <div class="subtitle mt-6">Pornită pe ${sinceTxt}. Toate datele se înregistrează doar din acest moment.</div>
+        </div>
+      </div>
+      <button class="btn ghost block mt-10" data-action="stop-tracking">${ICONS.pause}<span>Oprire contorizare</span></button>
+    </div>
+  ` : `
+    <div class="card" style="border-color:var(--amber);background:linear-gradient(135deg,rgba(245,158,11,.12),transparent)">
+      <div class="row" style="gap:12px">
+        <div class="m-icon amber">${ICONS.play}</div>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:14px">Contorizare oprită</div>
+          <div class="subtitle mt-6">Configurează obiceiuri, rutine, alarme, obiective — apoi apasă Pornește.</div>
+        </div>
+      </div>
+      <button class="btn primary block mt-10" data-action="start-tracking">${ICONS.play}<span>Pornește contorizarea</span></button>
+    </div>
+  `}
 
   ${settingRow('target', 'Obiective & preferințe', 'edit-goals')}
   ${settingRow('bell', 'Mementouri', 'edit-notifs')}
@@ -1405,6 +1454,7 @@ function openCardModal(id) {
 
 // —— Routine actions ——
 ACTIONS['toggle-routine'] = (el) => {
+  if (!requireStarted()) return;
   const id = el.dataset.id;
   const e = todayEntry();
   if (!e.routine) e.routine = { completed: [] };
@@ -1505,6 +1555,7 @@ ACTIONS['mood-rate'] = (el) => {
   $$('.mood-btn').forEach(b => b.classList.toggle('is-active', parseInt(b.dataset.r, 10) === r));
 };
 ACTIONS['mood-save'] = () => {
+  if (!requireStarted()) return;
   const e = todayEntry();
   const cur = e.mood || { rating: 3, energy: 60, stress: 40, note: '' };
   cur.energy = parseInt($('#energySlider').value, 10);
@@ -1556,6 +1607,7 @@ ACTIONS['nut-next'] = () => {
   viewState.date = nxt; render();
 };
 ACTIONS['water-add'] = (el) => {
+  if (!requireStarted()) return;
   const ml = parseInt(el.dataset.ml, 10) || 250;
   const e = getEntry(viewState.date || todayISO());
   if (!e.nutrition) e.nutrition = { meals: [], water_ml: 0, totals: { kcal:0, protein:0, carbs:0, fat:0 } };
@@ -1674,6 +1726,22 @@ function openWorkoutModal() {
   };
 }
 
+// —— Start / Stop tracking ——
+ACTIONS['start-tracking'] = () => {
+  state.meta.started_at = new Date().toISOString();
+  state.meta.streak_days = 1;
+  save();
+  toast('Contorizare pornită ✅');
+  notify('Contorizare pornită', 'Toate datele se înregistrează din acest moment.');
+  render();
+};
+ACTIONS['stop-tracking'] = () => {
+  confirmDialog('Oprire contorizare? Datele existente rămân, dar nu se mai înregistrează nimic nou până la Pornește.', () => {
+    state.meta.started_at = null;
+    save(); toast('Contorizare oprită'); render();
+  });
+};
+
 // —— Journal actions ——
 ACTIONS['j-day']       = (el) => { viewState.date = el.dataset.iso; render(); };
 ACTIONS['add-journal'] = ()   => openJournalModal(null, viewState.date || todayISO());
@@ -1709,6 +1777,7 @@ function openJournalModal(id, iso) {
 // —— Habits actions ——
 ACTIONS['hab-tab'] = (el) => { viewState.tab = el.dataset.tab; render(); };
 ACTIONS['toggle-habit'] = (el) => {
+  if (!requireStarted()) return;
   const id = el.dataset.id;
   const e = todayEntry();
   const arr = e.habits_done;
@@ -2038,6 +2107,7 @@ function autoLogWakeup() {
 }
 function localReminderTick() {
   if (!state.prefs.notifications) return;
+  if (!isStarted()) return;
   const now = new Date();
   const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
   const key = todayISO() + ':' + hhmm;
