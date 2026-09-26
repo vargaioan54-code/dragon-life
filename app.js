@@ -83,6 +83,7 @@ const DEFAULT_STATE = {
   entries: {},              // { isoDate: { sleep, mood, nutrition, activity, routine, journal, habits_done } }
   meta: { last_seen: todayISO(), streak_days: 1, created_at: todayISO(), data_version: DATA_VERSION, started_at: null },
   notifs: [],
+  current_sleep: null,       // { bedtime_ts, bedtime_hhmm, iso_day } | null — live sleep session
 };
 
 function isStarted() { return !!(state.meta && state.meta.started_at); }
@@ -615,6 +616,12 @@ VIEWS.routine_noon    = routineViewForSlot('noon');
 VIEWS.routine_evening = routineViewForSlot('evening');
 
 // —— Somn ——
+function sleepLiveDuration() {
+  const cs = state.current_sleep;
+  if (!cs) return null;
+  const min = Math.max(0, Math.round((Date.now() - cs.bedtime_ts) / 60000));
+  return min;
+}
 VIEWS.sleep = function() {
   const tab = viewState.tab || 'day';
   const iso = viewState.date || todayISO();
@@ -637,12 +644,38 @@ VIEWS.sleep = function() {
   const values = tab === 'day' ? null : series('sleep', tab === 'week' ? 7 : 30);
   const avgSleep = values ? avg(values) : 0;
 
+  const cs = state.current_sleep;
+  const liveMin = sleepLiveDuration();
+  const startedApp = isStarted();
+
   return `
   <div class="row" style="gap:10px">
     <button class="icon-btn" data-action="back">${ICONS.back}</button>
     <div style="flex:1"></div>
-    <button class="icon-btn" data-action="add-sleep" aria-label="Adaugă">${ICONS.plus}</button>
+    <button class="icon-btn" data-action="add-sleep" aria-label="Adaugă manual">${ICONS.plus}</button>
   </div>
+
+  ${cs ? `
+    <div class="card" style="border-color:var(--blue);background:linear-gradient(135deg,rgba(59,130,246,.14),transparent);text-align:center;padding:18px">
+      <div class="m-icon blue" style="margin:0 auto 8px">${ICONS.moon}</div>
+      <div style="font-weight:700;font-size:15px">Dormi de la ${cs.bedtime_hhmm}</div>
+      <div class="big" style="color:var(--blue);margin-top:8px">${fmtDur(liveMin)}</div>
+      <div class="subtitle">Apăsă când te trezești — se calculează totul</div>
+      <button class="btn primary block mt-14" data-action="sleep-wake">${ICONS.sun}<span>M-am trezit</span></button>
+      <button class="btn ghost block" data-action="sleep-cancel" style="margin-top:6px">Anulează somnul</button>
+    </div>
+  ` : `
+    <div class="card" style="text-align:center;padding:18px">
+      <div style="font-weight:700;font-size:15px">Ce faci acum?</div>
+      <div class="subtitle mt-6">Apasă când te culci sau când te trezești — app-ul contorizează automat.</div>
+      <div class="grid-2 mt-14">
+        <button class="btn primary" data-action="sleep-bed" ${!startedApp ? 'disabled' : ''}>${ICONS.moon}<span>Mă culc</span></button>
+        <button class="btn" data-action="sleep-wake" ${!startedApp ? 'disabled' : ''}>${ICONS.sun}<span>M-am trezit</span></button>
+      </div>
+      ${!startedApp ? '<div class="subtitle mt-10">Pornește contorizarea din Setări ca să folosești butoanele.</div>' : ''}
+    </div>
+  `}
+
   <div class="tabs" style="display:flex;width:100%;justify-content:center;margin-top:8px">
     <button class="tab ${tab==='day'?'is-active':''}" data-action="sleep-tab" data-tab="day">Zile</button>
     <button class="tab ${tab==='week'?'is-active':''}" data-action="sleep-tab" data-tab="week">Săptămâni</button>
@@ -1437,6 +1470,63 @@ function openRoutineModal(editId, defaultSlot) {
 // —— Sleep actions ——
 ACTIONS['sleep-tab'] = (el) => { viewState.tab = el.dataset.tab; render(); };
 ACTIONS['add-sleep'] = () => openSleepModal();
+
+ACTIONS['sleep-bed'] = () => {
+  if (!requireStarted()) return;
+  const now = new Date();
+  const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  // wakeup day = tomorrow if bedtime after 18:00, else today
+  const wakeIso = now.getHours() >= 18 ? isoOffset(1) : todayISO();
+  state.current_sleep = { bedtime_ts: now.getTime(), bedtime_hhmm: hhmm, iso_day: wakeIso };
+  const e = getEntry(wakeIso);
+  if (!e.sleep) e.sleep = {};
+  e.sleep.bedtime = hhmm;
+  save(); toast(`Culcare înregistrată la ${hhmm} — noapte bună 🌙`);
+  notify('Culcare', `Înregistrată la ${hhmm}. Apasă "M-am trezit" când te scoli.`);
+  render();
+  if (sleepTicker) clearInterval(sleepTicker);
+  sleepTicker = setInterval(() => { if (currentView === 'sleep' && state.current_sleep) render(); }, 60000);
+};
+ACTIONS['sleep-wake'] = () => {
+  if (!requireStarted()) return;
+  const now = new Date();
+  const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  const cs = state.current_sleep;
+  if (!cs) {
+    // No prior bedtime — ask user
+    return openSleepModal();
+  }
+  const iso = cs.iso_day;
+  const e = getEntry(iso);
+  if (!e.sleep) e.sleep = {};
+  e.sleep.bedtime = cs.bedtime_hhmm;
+  e.sleep.wakeup  = hhmm;
+  const total = Math.max(1, Math.round((now.getTime() - cs.bedtime_ts) / 60000));
+  e.sleep.total_min = total;
+  e.sleep.deep_min  = Math.round(total * 0.22);
+  e.sleep.rem_min   = Math.round(total * 0.20);
+  e.sleep.light_min = total - e.sleep.deep_min - e.sleep.rem_min;
+  e.sleep.awakenings = e.sleep.awakenings ?? 1;
+  state.current_sleep = null;
+  save();
+  toast(`Trezire la ${hhmm} — ai dormit ${fmtDur(total)} ☀️`);
+  notify('Trezire', `Trezire la ${hhmm}. Ai dormit ${fmtDur(total)}.`);
+  viewState.date = iso;
+  if (sleepTicker) { clearInterval(sleepTicker); sleepTicker = null; }
+  render();
+};
+ACTIONS['sleep-cancel'] = () => {
+  confirmDialog('Anulezi somnul curent? Nu se înregistrează nimic.', () => {
+    if (state.current_sleep) {
+      const e = getEntry(state.current_sleep.iso_day);
+      if (e.sleep && e.sleep.bedtime && !e.sleep.wakeup) e.sleep = null;
+    }
+    state.current_sleep = null;
+    if (sleepTicker) { clearInterval(sleepTicker); sleepTicker = null; }
+    save(); toast('Anulat'); render();
+  });
+};
+let sleepTicker = null;
 function openSleepModal() {
   const iso = todayISO();
   const e = getEntry(iso);
