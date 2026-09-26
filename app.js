@@ -1065,7 +1065,7 @@ VIEWS.settings = function() {
   ${settingRow('download', 'Export date', 'export')}
   ${settingRow('info', 'Despre aplicație', 'about', 'v1.0.0')}
 
-  <button class="btn danger block" data-action="logout" style="margin-top:16px">${ICONS.back}<span>Deconectare</span></button>
+  <button class="btn danger block" data-action="reset-data" style="margin-top:16px">${ICONS.trash}<span>Șterge datele locale</span></button>
   `;
 
   function settingRow(icon, label, action, extra) {
@@ -1624,13 +1624,13 @@ ACTIONS['export'] = () => {
   URL.revokeObjectURL(url);
   toast('Date exportate');
 };
-ACTIONS['logout'] = () => {
-  confirmDialog('Sigur vrei să resetezi datele locale? Acțiunea nu poate fi anulată.', () => {
+ACTIONS['reset-data'] = () => {
+  confirmDialog('Sigur vrei să ștergi toate datele locale? Acțiunea nu poate fi anulată.', () => {
     localStorage.removeItem(STORAGE_KEY);
     state = load();
     seedDemoHistory();
     save();
-    toast('Date resetate');
+    toast('Date șterse');
     go('dashboard');
   });
 };
@@ -1663,7 +1663,6 @@ function initShellWiring() {
   $('#btnMenu').onclick = () => $('#sidebar').classList.add('open');
   $('#sidebarScrim').onclick = () => $('#sidebar').classList.remove('open');
   $('#btnBell').onclick = toggleNotifs;
-  $('#btnLogout').onclick = () => ACTIONS['logout']();
   document.addEventListener('click', (e) => {
     const tray = $('#notifRoot');
     if (!tray.hidden && !e.target.closest('#notifRoot') && !e.target.closest('#btnBell')) tray.hidden = true;
