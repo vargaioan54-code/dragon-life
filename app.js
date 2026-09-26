@@ -1497,14 +1497,21 @@ ACTIONS['sleep-tab'] = (el) => { viewState.tab = el.dataset.tab; render(); };
 ACTIONS['add-sleep'] = () => openSleepModal();
 
 // —— Smoking ——
-ACTIONS['smoke-log'] = () => {
+ACTIONS['smoke-log'] = (el, ev, opts = {}) => {
   if (!requireStarted()) return;
   const e = todayEntry();
   if (!e.smoking) e.smoking = { entries: [] };
   if (!e.smoking.entries) e.smoking.entries = [];
-  e.smoking.entries.push({ ts: Date.now() });
+  e.smoking.entries.push({ ts: Date.now(), src: opts.src || 'manual' });
   save();
-  toast(`țigară #${e.smoking.entries.length}`);
+  const n = e.smoking.entries.length;
+  const via = opts.src === 'shake' ? ' (agitare)' : '';
+  const body = `Ai fumat astăzi ${n} țigări${via ? ' · înregistrat prin agitare' : ''}.`;
+  toast(`țigară #${n}${via}`);
+  notify('🚬 țigară înregistrată', body);
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try { new Notification('🚬 țigară #' + n, { body, icon: 'icon.svg', tag: 'smoke', renotify: true }); } catch (e) {}
+  }
   render();
 };
 ACTIONS['smoke-undo'] = () => {
@@ -2214,8 +2221,7 @@ function onShakeMotion(ev) {
       shakeState.times = [];
       shakeState.cooldown = now;
       if (navigator.vibrate) navigator.vibrate([80, 40, 80, 40, 120]);
-      ACTIONS['smoke-log']();
-      toast('🚬 țigară din agitare');
+      ACTIONS['smoke-log'](null, null, { src: 'shake' });
     }
   }
 }
