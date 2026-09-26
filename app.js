@@ -617,14 +617,14 @@ VIEWS.smoking = function() {
   <div class="card" style="padding:14px">
     <div class="spread">
       <div style="flex:1">
-        <div style="font-weight:600;font-size:14px">Agită 3× pentru +1</div>
-        <div class="subtitle mt-6">Agită telefonul de 3 ori rapid — se înregistrează automat.</div>
+        <div style="font-weight:600;font-size:14px">Agită 5× pentru +1</div>
+        <div class="subtitle mt-6">Agită telefonul de 5 ori rapid — se înregistrează automat. Ecranul rămâne aprins cât timp e activ.</div>
       </div>
       <label style="display:flex;align-items:center;gap:8px">
         <input type="checkbox" id="shakeToggle" ${shakeOn ? 'checked' : ''}/>
       </label>
     </div>
-    ${shakeOn ? '<div class="chip green mt-10">Activ — agită telefonul</div>' : ''}
+    ${shakeOn ? '<div class="chip green mt-10">Activ — agită telefonul 5×</div>' : ''}
   </div>
 
   <div class="card" style="padding:14px">
@@ -2221,10 +2221,9 @@ function localReminderTick() {
   }
 }
 
-// —— Flashlight (torch) — blink on smoke-log ——
-let flashStream = null;
-let flashTrack = null;
+// —— Flashlight (torch) — open camera on-demand only (avoid the 'recording' indicator) ——
 async function requestFlashlight() {
+  // just probe capabilities — open, check, close immediately
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     toast('Camera nu e disponibilă'); return false;
   }
@@ -2232,35 +2231,49 @@ async function requestFlashlight() {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
     const track = stream.getVideoTracks()[0];
     const caps = track.getCapabilities ? track.getCapabilities() : {};
+    track.stop(); // release right away — no persistent 'in use' indicator
     if (!caps.torch) {
-      track.stop();
       toast('Lanterna nu e suportată pe acest telefon/browser');
       return false;
     }
-    flashStream = stream;
-    flashTrack = track;
     return true;
   } catch (e) {
     toast('Permisiune cameră refuzată');
     return false;
   }
 }
-function releaseFlashlight() {
-  if (flashTrack) { try { flashTrack.stop(); } catch(e){} }
-  flashStream = null; flashTrack = null;
-}
+function releaseFlashlight() { /* nothing persistent to release */ }
 async function blinkFlashlight(times = 3, onMs = 180, offMs = 140) {
-  if (!flashTrack) return;
-  for (let i = 0; i < times; i++) {
-    try { await flashTrack.applyConstraints({ advanced: [{ torch: true }] }); } catch(e) { return; }
-    await new Promise(r => setTimeout(r, onMs));
-    try { await flashTrack.applyConstraints({ advanced: [{ torch: false }] }); } catch(e) {}
-    if (i < times - 1) await new Promise(r => setTimeout(r, offMs));
-  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+  let stream = null, track = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    track = stream.getVideoTracks()[0];
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (!caps.torch) { track.stop(); return; }
+    for (let i = 0; i < times; i++) {
+      try { await track.applyConstraints({ advanced: [{ torch: true }] }); } catch(e) { break; }
+      await new Promise(r => setTimeout(r, onMs));
+      try { await track.applyConstraints({ advanced: [{ torch: false }] }); } catch(e) {}
+      if (i < times - 1) await new Promise(r => setTimeout(r, offMs));
+    }
+  } catch (e) { /* silent */ }
+  finally { if (track) { try { track.stop(); } catch(e){} } }
 }
 
-// —— Shake detection (3× agitare = +1 țigară) ——
-const shakeState = { last: null, times: [], enabled: false, cooldown: 0 };
+// —— Shake detection (5× agitare = +1 țigară) + wake lock pentru screen-on ——
+const SHAKE_COUNT = 5;
+const shakeState = { last: null, times: [], enabled: false, cooldown: 0, wakeLock: null };
+async function acquireWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try { shakeState.wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+function releaseWakeLock() {
+  if (shakeState.wakeLock) { try { shakeState.wakeLock.release(); } catch(e){} shakeState.wakeLock = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state && state.prefs.smoke_shake && !shakeState.wakeLock) acquireWakeLock();
+});
 async function requestShakePermission() {
   if (typeof DeviceMotionEvent === 'undefined') { toast('Dispozitiv fără senzor de mișcare'); return false; }
   if (typeof DeviceMotionEvent.requestPermission === 'function') {
@@ -2283,10 +2296,10 @@ function onShakeMotion(ev) {
   if (mag > 25) {
     shakeState.times.push(now);
     shakeState.times = shakeState.times.filter(t => now - t < 2000);
-    if (shakeState.times.length >= 3) {
+    if (shakeState.times.length >= SHAKE_COUNT) {
       shakeState.times = [];
       shakeState.cooldown = now;
-      if (navigator.vibrate) navigator.vibrate([80, 40, 80, 40, 120]);
+      if (navigator.vibrate) navigator.vibrate([80, 40, 80, 40, 80, 40, 120]);
       ACTIONS['smoke-log'](null, null, { src: 'shake' });
     }
   }
@@ -2295,11 +2308,13 @@ function startShakeDetection() {
   if (shakeState.enabled) return;
   window.addEventListener('devicemotion', onShakeMotion);
   shakeState.enabled = true;
+  acquireWakeLock();
 }
 function stopShakeDetection() {
   window.removeEventListener('devicemotion', onShakeMotion);
   shakeState.enabled = false;
   shakeState.last = null; shakeState.times = [];
+  releaseWakeLock();
 }
 
 // public helpers for inline onclick
