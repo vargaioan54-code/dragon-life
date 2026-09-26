@@ -76,6 +76,7 @@ const DEFAULT_STATE = {
     bedtime: '22:00',          // alarmă culcare — auto-logează sleep.bedtime pe ziua următoare
     wakeup:  '08:00',          // alarmă trezire — auto-logează sleep.wakeup pe ziua curentă
     smoke_shake: false,        // detectare 3× agitare pentru +1 țigară
+    smoke_flash: false,        // blink lanternă pe fiecare țigară
   },
   routine_items: [],
   habits: [],
@@ -624,6 +625,19 @@ VIEWS.smoking = function() {
       </label>
     </div>
     ${shakeOn ? '<div class="chip green mt-10">Activ — agită telefonul</div>' : ''}
+  </div>
+
+  <div class="card" style="padding:14px">
+    <div class="spread">
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:14px">Blink lanternă (flash)</div>
+        <div class="subtitle mt-6">La fiecare țigară clipește lanterna telefonului 3×. (Doar pe Android/Chrome.)</div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="flashToggle" ${state.prefs.smoke_flash ? 'checked' : ''}/>
+      </label>
+    </div>
+    ${state.prefs.smoke_flash ? '<div class="chip green mt-10">Activ — lanterna va clipi</div>' : ''}
   </div>
   `;
 };
@@ -1366,6 +1380,19 @@ function wireViewActions() {
     }
     render();
   };
+  const flashToggle = $('#flashToggle'); if (flashToggle) flashToggle.onchange = async () => {
+    if (flashToggle.checked) {
+      const ok = await requestFlashlight();
+      if (!ok) { flashToggle.checked = false; return; }
+      state.prefs.smoke_flash = true; save();
+      toast('Lanternă gata — va clipi la fiecare țigară');
+      blinkFlashlight(1, 200); // one test blink
+    } else {
+      state.prefs.smoke_flash = false; save(); releaseFlashlight();
+      toast('Lanternă dezactivată');
+    }
+    render();
+  };
 }
 function renderSoft() { // avoid resetting scroll for the search
   const sy = window.scrollY;
@@ -1512,6 +1539,7 @@ ACTIONS['smoke-log'] = (el, ev, opts = {}) => {
   if ('Notification' in window && Notification.permission === 'granted') {
     try { new Notification('🚬 țigară #' + n, { body, icon: 'icon.svg', tag: 'smoke', renotify: true }); } catch (e) {}
   }
+  if (state.prefs.smoke_flash) blinkFlashlight();
   render();
 };
 ACTIONS['smoke-undo'] = () => {
@@ -2190,6 +2218,44 @@ function localReminderTick() {
     notify('Trezire', `Trezire înregistrată la ${state.prefs.wakeup} · dormit ${totalTxt}.`);
     state.meta.last_notif = key; save();
     if (currentView === 'dashboard' || currentView === 'sleep') render();
+  }
+}
+
+// —— Flashlight (torch) — blink on smoke-log ——
+let flashStream = null;
+let flashTrack = null;
+async function requestFlashlight() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    toast('Camera nu e disponibilă'); return false;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    const track = stream.getVideoTracks()[0];
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (!caps.torch) {
+      track.stop();
+      toast('Lanterna nu e suportată pe acest telefon/browser');
+      return false;
+    }
+    flashStream = stream;
+    flashTrack = track;
+    return true;
+  } catch (e) {
+    toast('Permisiune cameră refuzată');
+    return false;
+  }
+}
+function releaseFlashlight() {
+  if (flashTrack) { try { flashTrack.stop(); } catch(e){} }
+  flashStream = null; flashTrack = null;
+}
+async function blinkFlashlight(times = 3, onMs = 180, offMs = 140) {
+  if (!flashTrack) return;
+  for (let i = 0; i < times; i++) {
+    try { await flashTrack.applyConstraints({ advanced: [{ torch: true }] }); } catch(e) { return; }
+    await new Promise(r => setTimeout(r, onMs));
+    try { await flashTrack.applyConstraints({ advanced: [{ torch: false }] }); } catch(e) {}
+    if (i < times - 1) await new Promise(r => setTimeout(r, offMs));
   }
 }
 
