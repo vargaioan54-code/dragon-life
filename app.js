@@ -519,16 +519,20 @@ VIEWS.dashboard = function() {
     const view  = slot === 'morning' ? 'routine' : `routine_${slot}`;
     const iconName = slot === 'morning' ? 'sun' : slot === 'noon' ? 'bolt' : 'moon';
     const isNow = currentSlot() === slot;
-    return `<div class="card tap" data-view="${view}" style="${isNow ? 'border-color:var(--green)' : ''}">
+    return `<div class="card" style="${isNow ? 'border-color:var(--green)' : ''}">
       <div class="row" style="gap:12px">
         <div class="m-icon ${meta.color}">${ICONS[iconName]}</div>
-        <div style="flex:1">
+        <div style="flex:1;cursor:pointer" data-view="${view}">
           <div style="font-weight:600;font-size:14px">${esc(meta.title)} <span class="chip" style="margin-left:6px">${meta.hours}</span></div>
           <div class="subtitle">${done}/${items.length} pași completați</div>
         </div>
+        <button class="icon-btn" data-action="add-routine" data-slot="${slot}" aria-label="Adaugă activitate" style="width:36px;height:36px">${ICONS.plus}</button>
+      </div>
+      <div class="pbar ${meta.color} mt-10" data-view="${view}" style="cursor:pointer"><i style="width:${(p*100).toFixed(0)}%"></i></div>
+      <div class="spread mt-6" data-view="${view}" style="cursor:pointer">
+        <div class="subtitle">Apăsă + pentru a adăuga o activitate</div>
         <div class="chip ${meta.color}">${Math.round(p * 100)}%</div>
       </div>
-      <div class="pbar ${meta.color} mt-10"><i style="width:${(p*100).toFixed(0)}%"></i></div>
     </div>`;
   }).join('')}
 
@@ -2348,12 +2352,26 @@ async function registerPushUser() {
   const ready = await waitOneSignal();
   if (!ready) return null;
   try {
+    const OS = window.OneSignal;
     if (Notification.permission === 'default') {
-      await window.OneSignal.Notifications.requestPermission();
+      await OS.Notifications.requestPermission();
     }
     if (Notification.permission !== 'granted') return null;
     if (!state.meta.push_id) state.meta.push_id = 'dl_' + uid();
-    await window.OneSignal.login(state.meta.push_id);
+    await OS.login(state.meta.push_id);
+    // Ensure user is opted in for push
+    try {
+      const sub = OS.User && OS.User.PushSubscription;
+      if (sub && !sub.optedIn && typeof sub.optIn === 'function') await sub.optIn();
+    } catch (e) {}
+    // Wait until push subscription id is available (up to 5s)
+    for (let i = 0; i < 20; i++) {
+      try {
+        const sid = OS.User && OS.User.PushSubscription && OS.User.PushSubscription.id;
+        if (sid) break;
+      } catch (e) {}
+      await new Promise(r => setTimeout(r, 250));
+    }
     save();
     return state.meta.push_id;
   } catch (e) { return null; }
