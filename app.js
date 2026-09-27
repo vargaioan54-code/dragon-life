@@ -1276,7 +1276,7 @@ VIEWS.settings = function() {
     </div>
   ` : ''}
 
-  <button class="btn primary block" data-action="enable-all" style="margin:8px 0 8px">${ICONS.bell}<span>Activează tot (notificări + agitare + lanternă)</span></button>
+  <button class="btn primary block" data-action="enable-all" style="margin:8px 0 8px">${ICONS.bell}<span>Activează notificările</span></button>
 
   <div class="card" style="padding:12px;margin-bottom:14px">
     <div style="font-weight:600;font-size:13px;margin-bottom:8px">Diagnostic notificări</div>
@@ -1607,7 +1607,6 @@ ACTIONS['smoke-log'] = (el, ev, opts = {}) => {
   if ('Notification' in window && Notification.permission === 'granted') {
     try { new Notification('🚬 țigară #' + n, { body, icon: 'icon.svg', tag: 'smoke_' + n, renotify: true }); } catch (e) {}
   }
-  if (state.prefs.smoke_flash) blinkFlashlight();
   sendSmokePush(n, opts.src);
   render();
 };
@@ -2137,12 +2136,6 @@ ACTIONS['edit-notifs'] = () => {
     <div class="card" style="padding:10px 12px;margin:6px 0 12px">
       <div class="spread"><label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" id="nOn" ${p.notifications ? 'checked' : ''}/> Alarme active</label>${permTxt}</div>
     </div>
-    <div class="card" style="padding:10px 12px;margin:6px 0">
-      <div class="spread"><label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" id="nShake" ${p.smoke_shake ? 'checked' : ''}/> Agită 5× pentru +1 țigară</label></div>
-    </div>
-    <div class="card" style="padding:10px 12px;margin:0 0 12px">
-      <div class="spread"><label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" id="nFlash" ${p.smoke_flash ? 'checked' : ''}/> Blink lanternă la țigară</label></div>
-    </div>
     <button class="btn ghost block" id="nTest">${ICONS.bell}<span>Test notificare</span></button>
     <button class="btn primary block" id="nSave" style="margin-top:8px">Salvează</button>
   `);
@@ -2151,20 +2144,6 @@ ACTIONS['edit-notifs'] = () => {
     p.wakeup  = $('#nW').value || '08:00';
     p.notifications = $('#nOn').checked;
     if (p.notifications) await registerPushUser({ prompt: true });
-    const wantShake = $('#nShake').checked;
-    const wantFlash = $('#nFlash').checked;
-    if (wantShake && !p.smoke_shake) {
-      const ok = await requestShakePermission();
-      if (ok) { p.smoke_shake = true; startShakeDetection(); }
-    } else if (!wantShake && p.smoke_shake) {
-      p.smoke_shake = false; stopShakeDetection();
-    }
-    if (wantFlash && !p.smoke_flash) {
-      const ok = await requestFlashlight();
-      if (ok) { p.smoke_flash = true; blinkFlashlight(1, 200); }
-    } else if (!wantFlash && p.smoke_flash) {
-      p.smoke_flash = false; releaseFlashlight();
-    }
     save(); closeModal(); toast('Setat — culcare ' + p.bedtime + ' · trezire ' + p.wakeup);
     await syncSleepPushes();
   };
@@ -2465,12 +2444,9 @@ async function registerPushUser({ prompt = false } = {}) {
 }
 
 async function enableEverything() {
-  const results = { notif: false, shake: false, flash: false };
-  // 1) Notifications
   const id = await registerPushUser({ prompt: true });
   if (id && Notification.permission === 'granted') {
     state.prefs.notifications = true;
-    results.notif = true;
     try { new Notification('🐉 Dragon Life', { body: 'Notificările sunt active! Așa vor apărea toate.', icon: 'icon.svg', tag: 'welcome' }); } catch (e) {}
     setTimeout(async () => {
       try {
@@ -2481,24 +2457,15 @@ async function enableEverything() {
       } catch (e) {}
     }, 3000);
     if (isStarted()) { try { await syncSleepPushes(); await syncRoutinePushes(); } catch(e){} }
+    save();
+    toast('Notificări active ✅');
+    return { notif: true };
+  } else {
+    state.prefs.notifications = false;
+    save();
+    toast('Notificările n-au putut fi activate');
+    return { notif: false };
   }
-  // 2) Shake
-  try {
-    const okShake = await requestShakePermission();
-    if (okShake) { state.prefs.smoke_shake = true; startShakeDetection(); results.shake = true; }
-  } catch(e){}
-  // 3) Flash
-  try {
-    const okFlash = await requestFlashlight();
-    if (okFlash) { state.prefs.smoke_flash = true; blinkFlashlight(1, 200); results.flash = true; }
-  } catch(e){}
-  save();
-  const ok = [results.notif && 'notificări', results.shake && 'agitare', results.flash && 'lanternă'].filter(Boolean);
-  const fail = [!results.notif && 'notificări', !results.shake && 'agitare', !results.flash && 'lanternă'].filter(Boolean);
-  if (ok.length && !fail.length) toast('Toate activate ✅');
-  else if (ok.length) toast('Activate: ' + ok.join(', ') + (fail.length ? ' · refuzate: ' + fail.join(', ') : ''));
-  else toast('Nimic activat — verifică permisiunile browserului');
-  return results;
 }
 
 ACTIONS['enable-all'] = async () => { await enableEverything(); render(); };
@@ -2533,19 +2500,13 @@ ACTIONS['push-test-now'] = async () => {
 function openWelcomePrompt() {
   openModal(`
     <div class="modal-head"><h3>🐉 Bine ai venit în Dragon Life</h3></div>
-    <p class="subtitle">Apasă un singur buton și activăm tot ce ai nevoie: notificări, detectare agitare pentru țigări și blink lanternă.</p>
+    <p class="subtitle">Ca să primești alarme pentru culcare, trezire și activitățile din rutină, activează notificările.</p>
     <div class="card" style="padding:12px;margin-top:12px">
-      <div class="row" style="gap:8px;align-items:center"><span style="font-size:20px">🔔</span><div><div style="font-weight:600;font-size:14px">Notificări</div><div class="subtitle">Alarme, mementouri, țigări — sună când app-ul e închis</div></div></div>
-    </div>
-    <div class="card" style="padding:12px">
-      <div class="row" style="gap:8px;align-items:center"><span style="font-size:20px">📱</span><div><div style="font-weight:600;font-size:14px">Agită 5× pentru +1 țigară</div><div class="subtitle">Nu mai trebuie să deschizi app-ul</div></div></div>
-    </div>
-    <div class="card" style="padding:12px">
-      <div class="row" style="gap:8px;align-items:center"><span style="font-size:20px">🔦</span><div><div style="font-weight:600;font-size:14px">Blink lanternă la țigară</div><div class="subtitle">Confirmă vizual (Android)</div></div></div>
+      <div class="row" style="gap:8px;align-items:center"><span style="font-size:20px">🔔</span><div><div style="font-weight:600;font-size:14px">Notificări</div><div class="subtitle">Sună la ora activității chiar dacă app-ul e închis</div></div></div>
     </div>
     <div class="row" style="gap:8px;margin-top:14px">
       <button class="btn ghost block" id="wLater">Sări peste</button>
-      <button class="btn primary block" id="wEnable">${ICONS.check}<span>Activează tot</span></button>
+      <button class="btn primary block" id="wEnable">${ICONS.check}<span>Activează</span></button>
     </div>
   `, { center: true });
   $('#wLater').onclick = () => {
@@ -2722,12 +2683,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setInterval(localReminderTick, 60 * 1000);
   // Fire shortcut action if URL says so
   setTimeout(handleShortcutParams, 100);
-  if (state.prefs.smoke_shake) {
-    // Attempt to reactivate; permission may still be granted from previous session
-    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission !== 'function') {
-      startShakeDetection();
-    }
-  }
+
   // Show onboarding notification prompt exactly once, ever
   if (!state.meta.notif_prompted && Notification.permission === 'default') {
     setTimeout(openWelcomePrompt, 600);
