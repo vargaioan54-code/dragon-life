@@ -594,12 +594,11 @@ VIEWS.routine         = routineViewForSlot('morning');
 VIEWS.routine_noon    = routineViewForSlot('noon');
 VIEWS.routine_evening = routineViewForSlot('evening');
 
-// —— Fumat (simplu + shake) ——
+// —— Fumat (simplu) ——
 VIEWS.smoking = function() {
   const e = todayEntry();
   const count = (e.smoking && e.smoking.entries) ? e.smoking.entries.length : 0;
   const startedApp = isStarted();
-  const shakeOn = state.prefs.smoke_shake;
   return `
   <div class="row" style="gap:10px">
     <button class="icon-btn" data-action="back">${ICONS.back}</button>
@@ -612,32 +611,7 @@ VIEWS.smoking = function() {
     <div class="subtitle mt-6">azi</div>
     <button class="btn primary block mt-14" data-action="smoke-log" ${!startedApp ? 'disabled' : ''}>${ICONS.plus}<span>+1</span></button>
     ${count ? `<button class="btn ghost block" data-action="smoke-undo" style="margin-top:6px">Anulează</button>` : ''}
-  </div>
-
-  <div class="card" style="padding:14px">
-    <div class="spread">
-      <div style="flex:1">
-        <div style="font-weight:600;font-size:14px">Agită 5× pentru +1</div>
-        <div class="subtitle mt-6">Agită telefonul de 5 ori rapid — se înregistrează automat. Ecranul rămâne aprins cât timp e activ.</div>
-      </div>
-      <label style="display:flex;align-items:center;gap:8px">
-        <input type="checkbox" id="shakeToggle" ${shakeOn ? 'checked' : ''}/>
-      </label>
-    </div>
-    ${shakeOn ? '<div class="chip green mt-10">Activ — agită telefonul 5×</div>' : ''}
-  </div>
-
-  <div class="card" style="padding:14px">
-    <div class="spread">
-      <div style="flex:1">
-        <div style="font-weight:600;font-size:14px">Blink lanternă (flash)</div>
-        <div class="subtitle mt-6">La fiecare țigară clipește lanterna telefonului 3×. (Doar pe Android/Chrome.)</div>
-      </div>
-      <label style="display:flex;align-items:center;gap:8px">
-        <input type="checkbox" id="flashToggle" ${state.prefs.smoke_flash ? 'checked' : ''}/>
-      </label>
-    </div>
-    ${state.prefs.smoke_flash ? '<div class="chip green mt-10">Activ — lanterna va clipi</div>' : ''}
+    <div class="subtitle mt-14"><a class="link" data-view="more" style="color:var(--green);cursor:pointer">Setări Fumat →</a></div>
   </div>
   `;
 };
@@ -1338,6 +1312,8 @@ VIEWS.more = function() {
     ['stats','Statistici','list','cyan'],
     ['settings','Setări','shield',''],
   ];
+  const shakeOn = state.prefs.smoke_shake;
+  const flashOn = state.prefs.smoke_flash;
   return `
   <h1>Mai mult</h1>
   <p class="subtitle">Restul secțiunilor din aplicație.</p>
@@ -1348,6 +1324,34 @@ VIEWS.more = function() {
         <div style="font-weight:600;font-size:14px">${label}</div>
       </div>
     `).join('')}
+  </div>
+
+  <div class="section-title"><h2>Setări Fumat</h2></div>
+
+  <div class="card" style="padding:14px">
+    <div class="spread">
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:14px">Agită 5× pentru +1</div>
+        <div class="subtitle mt-6">Agită telefonul de 5 ori rapid — se înregistrează automat. Ecranul rămâne aprins cât timp e activ.</div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="shakeToggle" ${shakeOn ? 'checked' : ''}/>
+      </label>
+    </div>
+    ${shakeOn ? '<div class="chip green mt-10">Activ — agită telefonul 5×</div>' : ''}
+  </div>
+
+  <div class="card" style="padding:14px">
+    <div class="spread">
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:14px">Blink lanternă (flash)</div>
+        <div class="subtitle mt-6">La fiecare țigară clipește lanterna telefonului 3×. (Doar pe Android/Chrome.)</div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="flashToggle" ${flashOn ? 'checked' : ''}/>
+      </label>
+    </div>
+    ${flashOn ? '<div class="chip green mt-10">Activ — lanterna va clipi</div>' : ''}
   </div>
   `;
 };
@@ -1486,6 +1490,7 @@ ACTIONS['del-routine'] = (el) => {
     save(); toast('Șters'); render();
   });
 };
+async function afterRoutineChange() { try { await syncRoutinePushes(); } catch(e){} }
 function openRoutineModal(editId, defaultSlot) {
   const editing = editId ? state.routine_items.find(x => x.id === editId) : null;
   const slot = editing ? editing.slot : (defaultSlot || currentSlot());
@@ -1516,6 +1521,7 @@ function openRoutineModal(editId, defaultSlot) {
     if (editing) Object.assign(editing, { name, desc, duration, color, slot });
     else state.routine_items.push({ id: uid(), name, desc, duration, color, slot, icon: 'list' });
     save(); closeModal(); toast(editing ? 'Actualizat' : 'Adăugat'); render();
+    afterRoutineChange();
   };
 }
 
@@ -1540,6 +1546,7 @@ ACTIONS['smoke-log'] = (el, ev, opts = {}) => {
     try { new Notification('🚬 țigară #' + n, { body, icon: 'icon.svg', tag: 'smoke', renotify: true }); } catch (e) {}
   }
   if (state.prefs.smoke_flash) blinkFlashlight();
+  sendSmokePush(n, opts.src);
   render();
 };
 ACTIONS['smoke-undo'] = () => {
@@ -1826,12 +1833,16 @@ ACTIONS['start-tracking'] = async () => {
   notify('Contorizare pornită', 'Toate datele se înregistrează din acest moment.');
   render();
   await syncSleepPushes();
+  await syncRoutinePushes();
 };
 ACTIONS['stop-tracking'] = () => {
   confirmDialog('Oprire contorizare? Datele existente rămân, dar nu se mai înregistrează nimic nou până la Pornește.', async () => {
     state.meta.started_at = null;
     await cancelPush('bedtime');
     await cancelPush('wakeup');
+    await cancelPush('routine_morning');
+    await cancelPush('routine_noon');
+    await cancelPush('routine_evening');
     save(); toast('Contorizare oprită'); render();
   });
 };
@@ -2395,6 +2406,37 @@ async function syncSleepPushes() {
   await schedulePush('bedtime', '🌙 E ora de somn', 'Culcarea se înregistrează automat în aplicație.', state.prefs.bedtime);
   await schedulePush('wakeup',  '☀️ Bună dimineața!',  'Trezirea se înregistrează automat în aplicație.',   state.prefs.wakeup);
 }
+async function syncRoutinePushes() {
+  if (!state.prefs.notifications || !isStarted()) return;
+  for (const slot of ['morning', 'noon', 'evening']) {
+    await cancelPush('routine_' + slot);
+  }
+  const items = state.routine_items;
+  if (!items.length) return;
+  const slotHours = { morning: '08:00', noon: '12:00', evening: '17:00' };
+  const titles = { morning: '☀️ Rutina de dimineață', noon: '🌞 Rutina de amiază', evening: '🌙 Rutina de seară' };
+  for (const slot of ['morning', 'noon', 'evening']) {
+    const slotItems = items.filter(it => it.slot === slot);
+    if (!slotItems.length) continue;
+    await schedulePush('routine_' + slot, titles[slot], `${slotItems.length} activități te așteaptă. Deschide app-ul și bifează.`, slotHours[slot]);
+  }
+}
+async function sendSmokePush(count, via) {
+  const externalId = state.meta.push_id;
+  if (!externalId) return;
+  try {
+    await fetch(API_BASE + '/api?action=schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        externalId,
+        title: '🚬 țigară #' + count,
+        body: `Ai fumat astăzi ${count} țigări${via === 'shake' ? ' · din agitare' : ''}.`,
+        sendAt: new Date(Date.now() + 2000).toISOString(),
+      }),
+    });
+  } catch (e) {}
+}
 
 // public helpers for inline onclick
 window.DL = {
@@ -2414,9 +2456,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       startShakeDetection();
     }
   }
-  // Register with OneSignal + refresh scheduled sleep pushes so they fire while app is closed
+  // Register with OneSignal + refresh scheduled pushes so they fire while app is closed
   if (isStarted() && state.prefs.notifications) {
     try { await syncSleepPushes(); } catch (e) {}
+    try { await syncRoutinePushes(); } catch (e) {}
   }
 });
 
