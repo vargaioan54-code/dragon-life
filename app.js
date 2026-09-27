@@ -1270,13 +1270,30 @@ VIEWS.settings = function() {
 
   ${!isStandalone ? `
     <div class="card" style="border-color:var(--amber);background:linear-gradient(135deg,rgba(245,158,11,.12),transparent)">
-      <div style="font-weight:700;font-size:14px">📱 Instalează app-ul</div>
-      <div class="subtitle mt-6">Ca să primești notificări sus, ca de la Instagram/Facebook, chiar când app-ul e închis: deschide meniul browserului → <b>Instalează aplicația</b> (Android) sau <b>Adăugă la ecranul de start</b> (iOS Safari).</div>
+      <div style="font-weight:700;font-size:14px">⚠️ App-ul NU e instalat</div>
+      <div class="subtitle mt-6">
+        <b>Notificările cu telefonul blocat / app închis funcționează DOAR dacă ai instalat aplicația pe home screen.</b><br><br>
+        <b>Android Chrome:</b> Meniu (⋮) → <i>Instalează aplicația</i> sau <i>Add to Home screen</i>.<br>
+        <b>iOS Safari:</b> Buton Share (⬆️) → <i>Add to Home Screen</i>. Necesar iOS 16.4+.<br><br>
+        După instalare, deschide din iconița de pe home screen și apasă <b>Activează tot</b>.
+      </div>
       <button class="btn ghost block mt-10" id="btnInstallPWA" style="display:none">${ICONS.download}<span>Instalează acum</span></button>
     </div>
   ` : ''}
 
-  <button class="btn primary block" data-action="enable-all" style="margin:8px 0 14px">${ICONS.bell}<span>Activează tot (notificări + agitare + lanternă)</span></button>
+  <button class="btn primary block" data-action="enable-all" style="margin:8px 0 8px">${ICONS.bell}<span>Activează tot (notificări + agitare + lanternă)</span></button>
+
+  <div class="card" style="padding:12px;margin-bottom:14px">
+    <div style="font-weight:600;font-size:13px;margin-bottom:8px">Diagnostic notificări</div>
+    <div class="subtitle" style="font-family:monospace;font-size:11px;line-height:1.6">
+      • App instalat (PWA): <b style="color:${isStandalone ? 'var(--green)' : 'var(--red)'}">${isStandalone ? 'DA' : 'NU'}</b><br>
+      • Permisiune notificări: <b style="color:${notifStatus === 'granted' ? 'var(--green)' : 'var(--red)'}">${notifStatus}</b><br>
+      • Push ID: <b style="color:${state.meta.push_id ? 'var(--green)' : 'var(--red)'}">${state.meta.push_id ? state.meta.push_id.slice(0, 20) : 'nesetat'}</b><br>
+      • Alarme programate: <b>${state.meta.scheduled ? Object.keys(state.meta.scheduled).length : 0}</b><br>
+      • Service Worker: <b style="color:${'serviceWorker' in navigator ? 'var(--green)' : 'var(--red)'}">${'serviceWorker' in navigator ? 'suportat' : 'lipsă'}</b>
+    </div>
+    <button class="btn ghost block mt-10" data-action="push-test-now">${ICONS.bell}<span>Trimite push test acum</span></button>
+  </div>
 
   ${started ? `
     <div class="card" style="border-color:var(--green);background:linear-gradient(135deg,rgba(34,197,94,.1),transparent)">
@@ -2478,6 +2495,33 @@ async function enableEverything() {
 }
 
 ACTIONS['enable-all'] = async () => { await enableEverything(); render(); };
+
+ACTIONS['push-test-now'] = async () => {
+  if (!state.meta.push_id) {
+    toast('Nu ești înregistrat — apasă Activează tot mai întâi');
+    return;
+  }
+  try {
+    const r = await fetch(API_BASE + '/api?action=test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ externalId: state.meta.push_id }),
+    });
+    const j = await r.json();
+    if (j.id) {
+      toast('Test trimis — vine în câteva secunde');
+    } else if (j.errors) {
+      toast('Eroare: ' + j.errors.join(', ').slice(0, 60));
+      if (String(j.errors).includes('not subscribed')) {
+        toast('Subscription-ul nu e activ — instalează PWA + reactivează');
+      }
+    } else {
+      toast('Răspuns necunoscut de la server');
+    }
+  } catch (e) {
+    toast('Fără internet sau server picat');
+  }
+};
 
 function openWelcomePrompt() {
   openModal(`

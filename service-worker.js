@@ -1,7 +1,7 @@
 // OneSignal handles push events + notifications
 importScripts("https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js");
 
-const VERSION = 'dl-v46-start-end-local-timers'
+const VERSION = 'dl-v47-diagnostic-panel'
 const CACHE = 'dragonlife-' + VERSION;
 const ASSETS = [
   './',
