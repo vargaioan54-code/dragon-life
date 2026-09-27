@@ -14,6 +14,23 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icon.svg" />
   <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+  <script>
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    window.OneSignalDeferred.push(async function (OneSignal) {
+      try {
+        await OneSignal.init({
+          appId: "4170c90f-14dd-4985-899f-02f6642a8f0b",
+          serviceWorkerPath: "service-worker.js",
+          serviceWorkerParam: { scope: "/" },
+          allowLocalhostAsSecureOrigin: true,
+          notifyButton: { enable: false }
+        });
+        window.__DL_ONESIGNAL_READY = true;
+        window.dispatchEvent(new Event('onesignal-ready'));
+      } catch (e) { /* offline / blocked */ }
+    });
+  </script>
 </head>
 <body>
   <div class="app-shell">

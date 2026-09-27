@@ -1,7 +1,7 @@
 // OneSignal handles push events + notifications
 importScripts("https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js");
 
-const VERSION = 'dl-v36-shake5-wakelock';
+const VERSION = 'dl-v37-server-push';
 const CACHE = 'dragonlife-' + VERSION;
 const ASSETS = [
   './',

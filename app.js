@@ -83,7 +83,7 @@ const DEFAULT_STATE = {
   relax_items: [],
   custom_cards: [],         // user-built Dashboard cards
   entries: {},              // { isoDate: { sleep, mood, nutrition, activity, routine, journal, habits_done } }
-  meta: { last_seen: todayISO(), streak_days: 1, created_at: todayISO(), data_version: DATA_VERSION, started_at: null },
+  meta: { last_seen: todayISO(), streak_days: 1, created_at: todayISO(), data_version: DATA_VERSION, started_at: null, push_id: null, scheduled: {} },
   notifs: [],
   current_sleep: null,       // { bedtime_ts, bedtime_hhmm, iso_day } | null — live sleep session
 };
@@ -1818,17 +1818,20 @@ function openWorkoutModal() {
 }
 
 // —— Start / Stop tracking ——
-ACTIONS['start-tracking'] = () => {
+ACTIONS['start-tracking'] = async () => {
   state.meta.started_at = new Date().toISOString();
   state.meta.streak_days = 1;
   save();
   toast('Contorizare pornită ✅');
   notify('Contorizare pornită', 'Toate datele se înregistrează din acest moment.');
   render();
+  await syncSleepPushes();
 };
 ACTIONS['stop-tracking'] = () => {
-  confirmDialog('Oprire contorizare? Datele existente rămân, dar nu se mai înregistrează nimic nou până la Pornește.', () => {
+  confirmDialog('Oprire contorizare? Datele existente rămân, dar nu se mai înregistrează nimic nou până la Pornește.', async () => {
     state.meta.started_at = null;
+    await cancelPush('bedtime');
+    await cancelPush('wakeup');
     save(); toast('Contorizare oprită'); render();
   });
 };
@@ -2059,18 +2062,21 @@ ACTIONS['edit-notifs'] = () => {
     p.bedtime = $('#nB').value || '22:00';
     p.wakeup  = $('#nW').value || '08:00';
     p.notifications = $('#nOn').checked;
-    if (p.notifications && 'Notification' in window && Notification.permission === 'default') {
-      try { await Notification.requestPermission(); } catch (e) {}
-    }
+    if (p.notifications) await registerPushUser();
     save(); closeModal(); toast('Alarme salvate — culcare ' + p.bedtime + ' · trezire ' + p.wakeup);
+    await syncSleepPushes();
   };
   $('#nTest').onclick = async () => {
-    if ('Notification' in window) {
-      if (Notification.permission === 'default') { try { await Notification.requestPermission(); } catch (e) {} }
-      if (Notification.permission === 'granted') {
-        new Notification('Dragon Life', { body: 'Notificările funcționează ✅', icon: 'icon.svg' });
-      } else toast('Permite notificările din setul telefonului');
-    }
+    const externalId = await registerPushUser();
+    if (!externalId) { toast('Permite notificările mai întâi'); return; }
+    try {
+      const r = await fetch(API_BASE + '/api?action=test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ externalId }),
+      });
+      toast(r.ok ? 'Test trimis — vine în câteva secunde' : 'Trimitere eșuată');
+    } catch (e) { toast('Trimitere eșuată'); }
   };
 };
 ACTIONS['devices'] = () => openInfoModal('Dispozitive conectate',
@@ -2317,13 +2323,86 @@ function stopShakeDetection() {
   releaseWakeLock();
 }
 
+// —— OneSignal server push (works when app is closed) ——
+const API_BASE = location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 'https://dragon-life.vercel.app' : '';
+async function waitOneSignal(timeoutMs = 6000) {
+  if (window.__DL_ONESIGNAL_READY) return true;
+  return await new Promise(resolve => {
+    let done = false;
+    const t = setTimeout(() => { if (!done) { done = true; resolve(!!window.__DL_ONESIGNAL_READY); } }, timeoutMs);
+    window.addEventListener('onesignal-ready', () => { if (!done) { done = true; clearTimeout(t); resolve(true); } }, { once: true });
+  });
+}
+async function registerPushUser() {
+  const ready = await waitOneSignal();
+  if (!ready) return null;
+  try {
+    if (Notification.permission === 'default') {
+      await window.OneSignal.Notifications.requestPermission();
+    }
+    if (Notification.permission !== 'granted') return null;
+    if (!state.meta.push_id) state.meta.push_id = 'dl_' + uid();
+    await window.OneSignal.login(state.meta.push_id);
+    save();
+    return state.meta.push_id;
+  } catch (e) { return null; }
+}
+function nextOccurrenceISO(hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const now = new Date();
+  const target = new Date();
+  target.setHours(h, m, 0, 0);
+  if (target <= now) target.setDate(target.getDate() + 1);
+  return target.toISOString();
+}
+async function schedulePush(kind, title, body, hhmm) {
+  const externalId = await registerPushUser();
+  if (!externalId) return null;
+  const sendAt = nextOccurrenceISO(hhmm);
+  try {
+    const r = await fetch(API_BASE + '/api?action=schedule', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ externalId, title, body, sendAt }),
+    });
+    const j = await r.json();
+    if (j.id) {
+      if (!state.meta.scheduled) state.meta.scheduled = {};
+      state.meta.scheduled[kind] = j.id;
+      save();
+      return j.id;
+    }
+  } catch (e) { /* offline */ }
+  return null;
+}
+async function cancelPush(kind) {
+  const id = state.meta.scheduled && state.meta.scheduled[kind];
+  if (!id) return;
+  try {
+    await fetch(API_BASE + '/api?action=cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+  } catch (e) {}
+  delete state.meta.scheduled[kind];
+  save();
+}
+async function syncSleepPushes() {
+  if (!state.prefs.notifications || !isStarted()) return;
+  await cancelPush('bedtime');
+  await cancelPush('wakeup');
+  await schedulePush('bedtime', '🌙 E ora de somn', 'Culcarea se înregistrează automat în aplicație.', state.prefs.bedtime);
+  await schedulePush('wakeup',  '☀️ Bună dimineața!',  'Trezirea se înregistrează automat în aplicație.',   state.prefs.wakeup);
+}
+
 // public helpers for inline onclick
 window.DL = {
   close: closeModal,
   stopRelax: () => { if (relaxTimer) { clearInterval(relaxTimer); relaxTimer = null; } },
 };
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   state = load();
   save();
   updateStreak();
@@ -2334,6 +2413,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission !== 'function') {
       startShakeDetection();
     }
+  }
+  // Register with OneSignal + refresh scheduled sleep pushes so they fire while app is closed
+  if (isStarted() && state.prefs.notifications) {
+    try { await syncSleepPushes(); } catch (e) {}
   }
 });
 
