@@ -1,7 +1,7 @@
 // OneSignal handles push events + notifications
 importScripts("https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js");
 
-const VERSION = 'dl-v42-onboarding-all-in-one';
+const VERSION = 'dl-v43-native-notif-install'
 const CACHE = 'dragonlife-' + VERSION;
 const ASSETS = [
   './',

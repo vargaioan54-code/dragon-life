@@ -1252,12 +1252,29 @@ VIEWS.settings = function() {
   const started = isStarted();
   const sdate = started ? state.meta.started_at : null;
   const sinceTxt = sdate ? fmtDateFull(sdate.slice(0,10)) : '';
+  const notifStatus = ('Notification' in window) ? Notification.permission : 'unsupported';
+  const isStandalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
   return `
   <div class="row" style="gap:10px">
     <button class="icon-btn" data-action="back">${ICONS.back}</button>
     <div style="flex:1"></div>
     <div style="width:40px"></div>
   </div>
+
+  ${notifStatus === 'denied' ? `
+    <div class="card" style="border-color:var(--red);background:linear-gradient(135deg,rgba(239,68,68,.12),transparent)">
+      <div style="font-weight:700;font-size:14px;color:var(--red)">❗ Notificările sunt blocate</div>
+      <div class="subtitle mt-6">Le-ai refuzat mai devreme. Deschide setările browserului → site-uri → dragon-life.vercel.app → permite notificări, apoi restărtează app-ul.</div>
+    </div>
+  ` : ''}
+
+  ${!isStandalone ? `
+    <div class="card" style="border-color:var(--amber);background:linear-gradient(135deg,rgba(245,158,11,.12),transparent)">
+      <div style="font-weight:700;font-size:14px">📱 Instalează app-ul</div>
+      <div class="subtitle mt-6">Ca să primești notificări sus, ca de la Instagram/Facebook, chiar când app-ul e închis: deschide meniul browserului → <b>Instalează aplicația</b> (Android) sau <b>Adăugă la ecranul de start</b> (iOS Safari).</div>
+      <button class="btn ghost block mt-10" id="btnInstallPWA" style="display:none">${ICONS.download}<span>Instalează acum</span></button>
+    </div>
+  ` : ''}
 
   ${started ? `
     <div class="card" style="border-color:var(--green);background:linear-gradient(135deg,rgba(34,197,94,.1),transparent)">
@@ -1347,6 +1364,18 @@ function wireViewActions() {
   const eSlider = $('#energySlider'); if (eSlider) eSlider.oninput = e => { $('#energyVal').textContent = e.target.value + '%'; e.target.style.setProperty('--v', e.target.value + '%'); };
   const sSlider = $('#stressSlider'); if (sSlider) sSlider.oninput = e => { $('#stressVal').textContent = e.target.value + '%'; e.target.style.setProperty('--v', e.target.value + '%'); };
   const jSearch = $('#jSearch'); if (jSearch) jSearch.oninput = e => { viewState.q = e.target.value; renderSoft(); };
+  const btnInstall = $('#btnInstallPWA');
+  if (btnInstall && window.__DL_INSTALL_PROMPT) {
+    btnInstall.style.display = '';
+    btnInstall.onclick = async () => {
+      try {
+        window.__DL_INSTALL_PROMPT.prompt();
+        const res = await window.__DL_INSTALL_PROMPT.userChoice;
+        window.__DL_INSTALL_PROMPT = null;
+        if (res.outcome === 'accepted') toast('App instalată ✅');
+      } catch(e) {}
+    };
+  }
   const shakeToggle = $('#shakeToggle'); if (shakeToggle) shakeToggle.onchange = async () => {
     if (shakeToggle.checked) {
       const ok = await requestShakePermission();
@@ -2444,9 +2473,21 @@ function openWelcomePrompt() {
     state.meta.notif_prompted = true;
     if (wantNotif) {
       const id = await registerPushUser({ prompt: true });
-      if (id) {
+      if (id && Notification.permission === 'granted') {
         state.prefs.notifications = true;
         toast('Notificări active ✅');
+        // Fire native OS-level banner immediately to confirm
+        try { new Notification('🐉 Dragon Life', { body: 'Notificările funcționează! Așa vor apărea toate.', icon: 'icon.svg', tag: 'welcome' }); } catch (e) {}
+        // Also fire server-side push 3s later to prove closed-app delivery
+        setTimeout(async () => {
+          try {
+            await fetch(API_BASE + '/api?action=test', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ externalId: id }),
+            });
+          } catch (e) {}
+        }, 3000);
         if (isStarted()) { await syncSleepPushes(); await syncRoutinePushes(); }
       } else {
         state.prefs.notifications = false;
@@ -2553,6 +2594,12 @@ window.DL = {
   close: closeModal,
   stopRelax: () => { if (relaxTimer) { clearInterval(relaxTimer); relaxTimer = null; } },
 };
+
+// Capture install prompt for later use in Settings
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  window.__DL_INSTALL_PROMPT = e;
+});
 
 document.addEventListener('DOMContentLoaded', async () => {
   state = load();
