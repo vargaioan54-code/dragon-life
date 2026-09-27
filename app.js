@@ -1496,7 +1496,13 @@ ACTIONS['del-routine'] = (el) => {
     afterRoutineChange();
   });
 };
-async function afterRoutineChange() { try { await syncRoutinePushes(); } catch(e){} }
+async function afterRoutineChange() {
+  try { await syncRoutinePushes(); } catch(e){}
+  const count = state.routine_items.filter(it => it.start_time).length;
+  if (count > 0 && state.prefs.notifications && Notification.permission === 'granted') {
+    toast(`Alarme programate pentru ${count} activități ✅`);
+  }
+}
 function slotDefaultStart(slot) {
   return { morning: '08:00', noon: '12:00', evening: '17:00' }[slot] || '08:00';
 }
@@ -2542,14 +2548,46 @@ async function cancelPush(kind) {
   save();
 }
 async function syncSleepPushes() {
-  if (!state.prefs.notifications || !isStarted()) return;
+  if (!state.prefs.notifications) return;
   await cancelPush('bedtime');
   await cancelPush('wakeup');
+  clearLocal('bedtime'); clearLocal('wakeup');
+  scheduleLocal('bedtime', '🌙 E ora de somn', 'Apăsă Mă culc în app.', nextOccurrenceTs(state.prefs.bedtime));
+  scheduleLocal('wakeup',  '☀️ Bună dimineața!',  'Apăsă M-am trezit în app.',  nextOccurrenceTs(state.prefs.wakeup));
   await schedulePush('bedtime', '🌙 E ora de somn', 'Culcarea se înregistrează automat în aplicație.', state.prefs.bedtime);
   await schedulePush('wakeup',  '☀️ Bună dimineața!',  'Trezirea se înregistrează automat în aplicație.',   state.prefs.wakeup);
 }
+// In-memory local scheduled notifications (fire while app is open)
+const localTimers = new Map();
+function scheduleLocal(key, title, body, whenTs) {
+  clearLocal(key);
+  const delay = Math.max(0, whenTs - Date.now());
+  if (delay > 24 * 3600 * 1000) return; // don't schedule >24h ahead
+  const t = setTimeout(() => {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try { new Notification(title, { body, icon: 'icon.svg', tag: key, renotify: true }); } catch (e) {}
+    }
+    notify(title, body);
+    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    localTimers.delete(key);
+  }, delay);
+  localTimers.set(key, t);
+}
+function clearLocal(key) {
+  if (localTimers.has(key)) { clearTimeout(localTimers.get(key)); localTimers.delete(key); }
+}
+function clearAllLocal() { for (const t of localTimers.values()) clearTimeout(t); localTimers.clear(); }
+function nextOccurrenceTs(hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const now = new Date();
+  const target = new Date();
+  target.setHours(h, m, 0, 0);
+  if (target <= now) target.setDate(target.getDate() + 1);
+  return target.getTime();
+}
+
 async function syncRoutinePushes() {
-  if (!state.prefs.notifications || !isStarted()) return;
+  if (!state.prefs.notifications) return;
   // Cancel legacy slot-level pushes
   for (const slot of ['morning', 'noon', 'evening']) await cancelPush('routine_' + slot);
   // Cancel per-activity pushes that no longer exist
@@ -2561,14 +2599,26 @@ async function syncRoutinePushes() {
       }
     }
   }
-  // Schedule one push per activity at its start_time
+  // Clear all local timers before rescheduling
+  clearAllLocal();
+  // Schedule one push per activity at its start_time (start) AND end_time (end)
   const slotEmoji = { morning: '☀️', noon: '🌞', evening: '🌙' };
   for (const item of state.routine_items) {
     if (!item.start_time) continue;
     await cancelPush('activity_' + item.id);
-    const title = `${slotEmoji[item.slot] || '⏰'} ${item.name}`;
-    const body  = item.end_time ? `Programat ${item.start_time}–${item.end_time}. Deschide app-ul și bifează.` : `Programat ${item.start_time}. Deschide app-ul.`;
-    await schedulePush('activity_' + item.id, title, body, item.start_time);
+    await cancelPush('activity_end_' + item.id);
+    const titleStart = `${slotEmoji[item.slot] || '⏰'} ${item.name}`;
+    const bodyStart  = item.end_time ? `Start ${item.start_time}–${item.end_time}. Bifează când termini.` : `Start ${item.start_time}.`;
+    // Local timer for open-app case
+    scheduleLocal('activity_' + item.id, titleStart, bodyStart, nextOccurrenceTs(item.start_time));
+    // Server push for closed-app case
+    schedulePush('activity_' + item.id, titleStart, bodyStart, item.start_time);
+    if (item.end_time) {
+      const titleEnd = `✅ ${item.name} — gata`;
+      const bodyEnd  = `Timpul s-a terminat (${item.start_time}–${item.end_time}). Marchează-l bifat.`;
+      scheduleLocal('activity_end_' + item.id, titleEnd, bodyEnd, nextOccurrenceTs(item.end_time));
+      schedulePush('activity_end_' + item.id, titleEnd, bodyEnd, item.end_time);
+    }
   }
 }
 async function sendSmokePush(count, via) {
