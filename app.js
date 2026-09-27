@@ -86,6 +86,7 @@ const DEFAULT_STATE = {
   meta: { last_seen: todayISO(), streak_days: 1, created_at: todayISO(), data_version: DATA_VERSION, started_at: null, push_id: null, scheduled: {}, notif_prompted: false },
   notifs: [],
   current_sleep: null,       // { bedtime_ts, bedtime_hhmm, iso_day } | null — live sleep session
+  scheduled_tasks: [],       // [{ id, date (YYYY-MM-DD), time (HH:MM), title, note, done }]
 };
 
 function isStarted() { return !!(state.meta && state.meta.started_at); }
@@ -114,6 +115,7 @@ function load() {
     if (!merged.entries) merged.entries = {};
     if (!merged.notifs) merged.notifs = [];
     if (!merged.custom_cards) merged.custom_cards = [];
+    if (!merged.scheduled_tasks) merged.scheduled_tasks = [];
     if (!merged.meta) merged.meta = { last_seen: todayISO(), streak_days: 1, created_at: todayISO(), data_version: DATA_VERSION };
     // One-time cleanup of the old seeded demo dataset
     if (merged.meta.data_version !== DATA_VERSION) {
@@ -985,12 +987,32 @@ VIEWS.journal = function() {
   }
   all.sort((a,b) => (b.ts || 0) - (a.ts || 0));
   const filtered = q ? all.filter(j => (j.title + ' ' + j.body).toLowerCase().includes(q)) : all.filter(j => j.date === focusIso);
+  const now = todayISO();
+  const upcoming = (state.scheduled_tasks || []).filter(t => t.date >= now && !t.done).sort((a,b) => (a.date + (a.time||'00:00')).localeCompare(b.date + (b.time||'00:00')));
   return `
   <div class="row" style="gap:10px">
     <button class="icon-btn" data-action="back">${ICONS.back}</button>
     <div style="flex:1"></div>
     <button class="icon-btn" data-action="add-journal">${ICONS.plus}</button>
   </div>
+
+  <div class="section-title"><h2>Task-uri programate</h2><button class="link" data-action="add-task">+ adaugă</button></div>
+  ${upcoming.length ? upcoming.map(t => {
+    const d = parseISO(t.date);
+    const isToday = t.date === now;
+    return `<div class="card" style="padding:12px${isToday ? ';border-color:var(--green)' : ''}">
+      <div class="row" style="gap:12px">
+        <div class="m-icon ${isToday ? '' : 'blue'}">${ICONS.bell}</div>
+        <div style="flex:1;cursor:pointer" data-action="edit-task" data-id="${t.id}">
+          <div style="font-weight:600;font-size:14px">${esc(t.title)}</div>
+          <div class="subtitle mt-6">${fmtDateFull(t.date)}${t.time ? ' · ' + t.time : ''}${isToday ? ' · <b style="color:var(--green)">azi</b>' : ''}</div>
+          ${t.note ? `<div class="subtitle mt-6" style="white-space:pre-line">${esc(t.note)}</div>` : ''}
+        </div>
+        <button class="h-action" data-action="done-task" data-id="${t.id}" aria-label="Marchează făcut">${ICONS.check}</button>
+        <button class="h-action" data-action="del-task" data-id="${t.id}" aria-label="Șterge">${ICONS.trash}</button>
+      </div>
+    </div>`;
+  }).join('') : '<div class="card"><div class="subtitle" style="text-align:center;padding:6px 0">Niciun task programat</div></div>'}
 
   <div class="week-strip">
     ${strip.map(iso => {
@@ -1921,6 +1943,74 @@ ACTIONS['stop-tracking'] = () => {
 ACTIONS['j-day']       = (el) => { viewState.date = el.dataset.iso; render(); };
 ACTIONS['add-journal'] = ()   => openJournalModal(null, viewState.date || todayISO());
 ACTIONS['edit-journal']= (el) => openJournalModal(el.dataset.id, el.dataset.date);
+
+// —— Scheduled tasks (with push at date+time) ——
+ACTIONS['add-task']  = ()   => openTaskModal();
+ACTIONS['edit-task'] = (el) => openTaskModal(el.dataset.id);
+ACTIONS['del-task']  = (el) => {
+  const id = el.dataset.id;
+  confirmDialog('Ștergi acest task programat?', async () => {
+    await cancelPush('task_' + id);
+    state.scheduled_tasks = state.scheduled_tasks.filter(t => t.id !== id);
+    save(); toast('Șters'); render();
+  });
+};
+ACTIONS['done-task'] = async (el) => {
+  const id = el.dataset.id;
+  const t = state.scheduled_tasks.find(x => x.id === id);
+  if (!t) return;
+  t.done = true;
+  await cancelPush('task_' + id);
+  save(); toast('Marcat făcut ✓'); render();
+};
+function openTaskModal(id) {
+  const editing = id ? state.scheduled_tasks.find(t => t.id === id) : null;
+  const cur = editing || { title: '', date: todayISO(), time: '09:00', note: '' };
+  openModal(`
+    <div class="modal-head"><h3>${editing ? 'Editează' : 'Adaugă'} task programat</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
+    <div class="field"><label>Titlu</label><input class="input" id="tT" value="${esc(cur.title)}" placeholder=""/></div>
+    <div class="grid-2">
+      <div class="field"><label>Data</label><input class="input" id="tD" type="date" value="${cur.date}" min="${todayISO()}"/></div>
+      <div class="field"><label>Ora</label><input class="input" id="tTime" type="time" value="${cur.time || '09:00'}"/></div>
+    </div>
+    <div class="field"><label>Notă (opțional)</label><textarea class="input" id="tN" style="min-height:100px">${esc(cur.note || '')}</textarea></div>
+    <div class="row" style="gap:8px">
+      <button class="btn primary block" id="tSave">${editing ? 'Salvează' : 'Adaugă'}</button>
+      ${editing ? `<button class="btn danger" id="tDel">${ICONS.trash}</button>` : ''}
+    </div>
+  `);
+  $('#tSave').onclick = async () => {
+    const title = $('#tT').value.trim();
+    if (!title) return toast('Titlul e obligatoriu');
+    const data = { title, date: $('#tD').value, time: $('#tTime').value, note: $('#tN').value.trim() };
+    let taskId;
+    if (editing) { Object.assign(editing, data); taskId = editing.id; await cancelPush('task_' + taskId); }
+    else { taskId = uid(); state.scheduled_tasks.push({ id: taskId, ...data, done: false }); }
+    // Schedule server push at exact date+time
+    const sendAt = new Date(data.date + 'T' + data.time + ':00').toISOString();
+    if (new Date(sendAt).getTime() > Date.now()) {
+      const externalId = state.meta.push_id;
+      if (externalId) {
+        try {
+          const r = await fetch(API_BASE + '/api?action=schedule', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ externalId, title: '📅 ' + data.title, body: data.note || 'Task programat pentru azi.', sendAt }),
+          });
+          const j = await r.json();
+          if (j.id) {
+            if (!state.meta.scheduled) state.meta.scheduled = {};
+            state.meta.scheduled['task_' + taskId] = j.id;
+          }
+        } catch(e) {}
+      }
+    }
+    save(); closeModal(); toast(editing ? 'Actualizat' : 'Task programat ✓'); render();
+  };
+  if (editing) $('#tDel').onclick = () => {
+    ACTIONS['del-task']({ dataset: { id } });
+    closeModal();
+  };
+}
 function openJournalModal(id, iso) {
   iso = iso || todayISO();
   const e = getEntry(iso);
