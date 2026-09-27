@@ -581,12 +581,11 @@ function routineViewForSlot(slot) {
 
     function routineRow(item, done) {
       const timeTxt = item.start_time && item.end_time ? `${item.start_time}–${item.end_time}` : `${item.duration || 5} min`;
-      const descTxt = item.desc ? `${esc(item.desc)} · ${timeTxt}` : timeTxt;
       return `<div class="list-row ${done ? 'done' : ''}" data-action="toggle-routine" data-id="${item.id}">
         <div class="icn ${done ? 'done' : ''}">${done ? ICONS.check : (ICONS[item.icon] || ICONS.check)}</div>
         <div>
           <div class="title">${esc(item.name)}</div>
-          <div class="sub">${descTxt}</div>
+          <div class="sub">${timeTxt}</div>
         </div>
         <div class="row" style="gap:4px">
           <button class="icon-btn" style="width:32px;height:32px;background:transparent;border:0" data-action="edit-routine" data-id="${item.id}" aria-label="Editează">${ICONS.edit}</button>
@@ -1318,8 +1317,6 @@ VIEWS.more = function() {
     ['stats','Statistici','list','cyan'],
     ['settings','Setări','shield',''],
   ];
-  const shakeOn = state.prefs.smoke_shake;
-  const flashOn = state.prefs.smoke_flash;
   return `
   <h1>Mai mult</h1>
   <p class="subtitle">Restul secțiunilor din aplicație.</p>
@@ -1330,34 +1327,6 @@ VIEWS.more = function() {
         <div style="font-weight:600;font-size:14px">${label}</div>
       </div>
     `).join('')}
-  </div>
-
-  <div class="section-title"><h2>Setări Fumat</h2></div>
-
-  <div class="card" style="padding:14px">
-    <div class="spread">
-      <div style="flex:1">
-        <div style="font-weight:600;font-size:14px">Agită 5× pentru +1</div>
-        <div class="subtitle mt-6">Agită telefonul de 5 ori rapid — se înregistrează automat. Ecranul rămâne aprins cât timp e activ.</div>
-      </div>
-      <label style="display:flex;align-items:center;gap:8px">
-        <input type="checkbox" id="shakeToggle" ${shakeOn ? 'checked' : ''}/>
-      </label>
-    </div>
-    ${shakeOn ? '<div class="chip green mt-10">Activ — agită telefonul 5×</div>' : ''}
-  </div>
-
-  <div class="card" style="padding:14px">
-    <div class="spread">
-      <div style="flex:1">
-        <div style="font-weight:600;font-size:14px">Blink lanternă (flash)</div>
-        <div class="subtitle mt-6">La fiecare țigară clipește lanterna telefonului 3×. (Doar pe Android/Chrome.)</div>
-      </div>
-      <label style="display:flex;align-items:center;gap:8px">
-        <input type="checkbox" id="flashToggle" ${flashOn ? 'checked' : ''}/>
-      </label>
-    </div>
-    ${flashOn ? '<div class="chip green mt-10">Activ — lanterna va clipi</div>' : ''}
   </div>
   `;
 };
@@ -1383,12 +1352,11 @@ function wireViewActions() {
       const ok = await requestShakePermission();
       if (!ok) { shakeToggle.checked = false; toast('Permisiune de mișcare refuzată'); return; }
       state.prefs.smoke_shake = true; save(); startShakeDetection();
-      toast('Detecție activă — agită 3×');
+      toast('Detecție activă — agită 5×');
     } else {
       state.prefs.smoke_shake = false; save(); stopShakeDetection();
       toast('Detecție oprită');
     }
-    render();
   };
   const flashToggle = $('#flashToggle'); if (flashToggle) flashToggle.onchange = async () => {
     if (flashToggle.checked) {
@@ -1396,12 +1364,11 @@ function wireViewActions() {
       if (!ok) { flashToggle.checked = false; return; }
       state.prefs.smoke_flash = true; save();
       toast('Lanternă gata — va clipi la fiecare țigară');
-      blinkFlashlight(1, 200); // one test blink
+      blinkFlashlight(1, 200);
     } else {
       state.prefs.smoke_flash = false; save(); releaseFlashlight();
       toast('Lanternă dezactivată');
     }
-    render();
   };
 }
 function renderSoft() { // avoid resetting scroll for the search
@@ -1521,7 +1488,6 @@ function openRoutineModal(editId, defaultSlot) {
   openModal(`
     <div class="modal-head"><h3>${editing ? 'Editează' : 'Adaugă'} activitate</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
     <div class="field"><label>Nume</label><input class="input" id="rN" value="${esc(editing ? editing.name : '')}" placeholder=""/></div>
-    <div class="field"><label>Descriere</label><input class="input" id="rD" value="${esc(editing ? editing.desc : '')}" placeholder=""/></div>
     <div class="field"><label>Interval</label><select class="input" id="rS">
       <option value="morning" ${slot==='morning'?'selected':''}>Dimineață (8–12)</option>
       <option value="noon"    ${slot==='noon'?'selected':''}>Amiază (12–17)</option>
@@ -1531,9 +1497,6 @@ function openRoutineModal(editId, defaultSlot) {
       <div class="field"><label>Ora de început</label><input class="input" id="rStart" type="time" value="${startVal}"/></div>
       <div class="field"><label>Ora de sfârșit</label><input class="input" id="rEnd" type="time" value="${endVal}"/></div>
     </div>
-    <div class="field"><label>Culoare</label><select class="input" id="rC">
-      ${['green','blue','amber','purple','pink','cyan','red'].map(c => `<option value="${c}" ${editing && editing.color===c?'selected':''}>${c}</option>`).join('')}
-    </select></div>
     <button class="btn primary block" id="rSave">${editing ? 'Salvează' : 'Adaugă'}</button>
   `);
   // when slot changes, snap start time to slot start
@@ -1555,15 +1518,14 @@ function openRoutineModal(editId, defaultSlot) {
   $('#rEnd').addEventListener('change', () => { lastEnd = $('#rEnd').value; });
   $('#rSave').onclick = () => {
     const name = $('#rN').value.trim();
-    const desc = $('#rD').value.trim();
-    const color = $('#rC').value;
     const slot = $('#rS').value;
     const start_time = $('#rStart').value;
     const end_time   = $('#rEnd').value;
     const duration   = minutesFromTimes(start_time, end_time);
     if (!name) return toast('Numele e obligatoriu');
-    if (editing) Object.assign(editing, { name, desc, duration, color, slot, start_time, end_time });
-    else state.routine_items.push({ id: uid(), name, desc, duration, color, slot, start_time, end_time, icon: 'list' });
+    const defaultColor = { morning: 'amber', noon: 'green', evening: 'purple' }[slot] || 'green';
+    if (editing) Object.assign(editing, { name, desc: '', duration, color: editing.color || defaultColor, slot, start_time, end_time });
+    else state.routine_items.push({ id: uid(), name, desc: '', duration, color: defaultColor, slot, start_time, end_time, icon: 'list' });
     save(); closeModal(); toast(editing ? 'Actualizat' : 'Adăugat'); render();
     afterRoutineChange();
   };
@@ -2101,7 +2063,7 @@ ACTIONS['edit-notifs'] = () => {
       : '<span class="chip amber">Neactivate</span>')
     : '<span class="chip red">Neacceptate</span>';
   openModal(`
-    <div class="modal-head"><h3>Alarme &amp; mementouri</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
+    <div class="modal-head"><h3>Alarme &amp; scurtături</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
     <p class="subtitle" style="margin-bottom:10px">La ora setată sună telefonul și somnul se logează automat.</p>
     <div class="grid-2">
       <div class="field"><label>🌙 Culcare (bedtime)</label><input class="input" id="nB" type="time" value="${p.bedtime}"/></div>
@@ -2109,6 +2071,12 @@ ACTIONS['edit-notifs'] = () => {
     </div>
     <div class="card" style="padding:10px 12px;margin:6px 0 12px">
       <div class="spread"><label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" id="nOn" ${p.notifications ? 'checked' : ''}/> Alarme active</label>${permTxt}</div>
+    </div>
+    <div class="card" style="padding:10px 12px;margin:6px 0">
+      <div class="spread"><label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" id="nShake" ${p.smoke_shake ? 'checked' : ''}/> Agită 5× pentru +1 țigară</label></div>
+    </div>
+    <div class="card" style="padding:10px 12px;margin:0 0 12px">
+      <div class="spread"><label style="display:flex;align-items:center;gap:8px;font-size:14px"><input type="checkbox" id="nFlash" ${p.smoke_flash ? 'checked' : ''}/> Blink lanternă la țigară</label></div>
     </div>
     <button class="btn ghost block" id="nTest">${ICONS.bell}<span>Test notificare</span></button>
     <button class="btn primary block" id="nSave" style="margin-top:8px">Salvează</button>
@@ -2118,7 +2086,21 @@ ACTIONS['edit-notifs'] = () => {
     p.wakeup  = $('#nW').value || '08:00';
     p.notifications = $('#nOn').checked;
     if (p.notifications) await registerPushUser({ prompt: true });
-    save(); closeModal(); toast('Alarme salvate — culcare ' + p.bedtime + ' · trezire ' + p.wakeup);
+    const wantShake = $('#nShake').checked;
+    const wantFlash = $('#nFlash').checked;
+    if (wantShake && !p.smoke_shake) {
+      const ok = await requestShakePermission();
+      if (ok) { p.smoke_shake = true; startShakeDetection(); }
+    } else if (!wantShake && p.smoke_shake) {
+      p.smoke_shake = false; stopShakeDetection();
+    }
+    if (wantFlash && !p.smoke_flash) {
+      const ok = await requestFlashlight();
+      if (ok) { p.smoke_flash = true; blinkFlashlight(1, 200); }
+    } else if (!wantFlash && p.smoke_flash) {
+      p.smoke_flash = false; releaseFlashlight();
+    }
+    save(); closeModal(); toast('Setat — culcare ' + p.bedtime + ' · trezire ' + p.wakeup);
     await syncSleepPushes();
   };
   $('#nTest').onclick = async () => {
@@ -2420,25 +2402,70 @@ async function registerPushUser({ prompt = false } = {}) {
 function openWelcomePrompt() {
   openModal(`
     <div class="modal-head"><h3>🐉 Bine ai venit în Dragon Life</h3></div>
-    <p class="subtitle">Ca să primiți alarmele de culcare / trezire, mementourile pentru rutine și confirmările de țigară <b>chiar și când app-ul e închis</b>, activează notificările.</p>
-    <p class="subtitle" style="margin-top:10px">Vom întreba o singură dată. Poți schimba oricând din Setări.</p>
+    <p class="subtitle">Configurează o singură dată notificările și scurtăturile pentru fumat. Le poți schimba oricând din Setări → Alarme.</p>
+
+    <label class="card" style="display:flex;align-items:flex-start;gap:12px;padding:12px;margin-top:12px;cursor:pointer">
+      <input type="checkbox" id="wNotif" checked style="margin-top:2px"/>
+      <div>
+        <div style="font-weight:600;font-size:14px">🔔 Notificări</div>
+        <div class="subtitle mt-6">Alarme culcare / trezire, mementouri rutine, confirmări țigară — chiar și când app-ul e închis.</div>
+      </div>
+    </label>
+
+    <label class="card" style="display:flex;align-items:flex-start;gap:12px;padding:12px;cursor:pointer">
+      <input type="checkbox" id="wShake" style="margin-top:2px"/>
+      <div>
+        <div style="font-weight:600;font-size:14px">📱 Agită 5× pentru +1 țigară</div>
+        <div class="subtitle mt-6">Agită telefonul de 5 ori rapid — se înregistrează automat o țigară.</div>
+      </div>
+    </label>
+
+    <label class="card" style="display:flex;align-items:flex-start;gap:12px;padding:12px;cursor:pointer">
+      <input type="checkbox" id="wFlash" style="margin-top:2px"/>
+      <div>
+        <div style="font-weight:600;font-size:14px">🔦 Blink lanternă la țigară</div>
+        <div class="subtitle mt-6">Lanterna telefonului clipește 3× la fiecare țigară (Android/Chrome).</div>
+      </div>
+    </label>
+
     <div class="row" style="gap:8px;margin-top:14px">
-      <button class="btn ghost block" id="wLater">Mai târziu</button>
-      <button class="btn primary block" id="wEnable">${ICONS.bell}<span>Activează</span></button>
+      <button class="btn ghost block" id="wLater">Sări peste</button>
+      <button class="btn primary block" id="wEnable">${ICONS.check}<span>Salvează</span></button>
     </div>
   `, { center: true });
   $('#wLater').onclick = () => {
     state.meta.notif_prompted = true; save(); closeModal();
   };
   $('#wEnable').onclick = async () => {
+    const wantNotif = $('#wNotif').checked;
+    const wantShake = $('#wShake').checked;
+    const wantFlash = $('#wFlash').checked;
     closeModal();
-    const id = await registerPushUser({ prompt: true });
-    if (id) {
-      toast('Notificările sunt active ✅');
-      if (isStarted()) { await syncSleepPushes(); await syncRoutinePushes(); }
+    state.meta.notif_prompted = true;
+    if (wantNotif) {
+      const id = await registerPushUser({ prompt: true });
+      if (id) {
+        state.prefs.notifications = true;
+        toast('Notificări active ✅');
+        if (isStarted()) { await syncSleepPushes(); await syncRoutinePushes(); }
+      } else {
+        state.prefs.notifications = false;
+        toast('Notificările rămân dezactivate');
+      }
     } else {
-      toast('Notificările rămân dezactivate — le poți activa din Setări');
+      state.prefs.notifications = false;
     }
+    if (wantShake) {
+      const ok = await requestShakePermission();
+      if (ok) { state.prefs.smoke_shake = true; startShakeDetection(); toast('Detecție agitare activă'); }
+      else { state.prefs.smoke_shake = false; }
+    }
+    if (wantFlash) {
+      const ok = await requestFlashlight();
+      if (ok) { state.prefs.smoke_flash = true; blinkFlashlight(1, 200); toast('Flash lanternă activ'); }
+      else { state.prefs.smoke_flash = false; }
+    }
+    save();
   };
 }
 function nextOccurrenceISO(hhmm) {
