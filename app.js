@@ -628,6 +628,16 @@ VIEWS.smoking = function() {
     </div>
     ${shakeOn ? `<button class="btn ghost block mt-10" data-action="shake-test">${ICONS.plus}<span>Simulează agitare</span></button>` : `<button class="btn ghost block mt-10" data-view="settings">${ICONS.bell}<span>Deschide Setări</span></button>`}
   </div>
+
+  <div class="card" style="padding:14px;border-color:var(--green);background:linear-gradient(135deg,rgba(34,197,94,.08),transparent)">
+    <div style="font-weight:600;font-size:14px">🔥 Iconiță shortcut — 1 tap → +1 țigară</div>
+    <div class="subtitle mt-6">
+      Pune o iconiță <b>🚬 +1</b> pe home screen. 1 tap = țigară înregistrată, app-ul se închide singur. Merge și din alt app / cu telefonul blocat (după deblocare).<br><br>
+      <b>Android — automat:</b> dacă ai instalat PWA-ul, apasă lung pe iconița Dragon Life → selectezi <b>+1 țigară</b>. Sau trage-l pe home screen din meniu.<br><br>
+      <b>Manual (orice telefon):</b> apasă butonul de mai jos, apoi în browser → <i>Add to Home Screen</i>. Botezi iconița <b>🚬 +1</b>.
+    </div>
+    <button class="btn ghost block mt-10" data-action="open-smoke-shortcut">${ICONS.download}<span>Deschide URL-ul shortcut</span></button>
+  </div>
   `;
 };
 
@@ -1635,6 +1645,9 @@ ACTIONS['smoke-undo'] = () => {
 ACTIONS['shake-test'] = () => {
   // Simulate a shake trigger to verify the full pipeline works
   ACTIONS['smoke-log'](null, null, { src: 'shake' });
+};
+ACTIONS['open-smoke-shortcut'] = () => {
+  window.open(location.origin + location.pathname + '?log=smoke#smoking', '_blank');
 };
 
 ACTIONS['sleep-bed'] = () => {
@@ -2713,12 +2726,27 @@ window.addEventListener('beforeinstallprompt', (e) => {
   window.__DL_INSTALL_PROMPT = e;
 });
 
+// URL param handler for home-screen shortcut (e.g. ?log=smoke)
+function handleShortcutParams() {
+  const params = new URLSearchParams(location.search);
+  const log = params.get('log');
+  if (log === 'smoke') {
+    ACTIONS['smoke-log'](null, null, { src: 'shortcut' });
+    // Clean the URL so refresh doesn't re-trigger
+    history.replaceState({}, '', location.pathname + location.hash);
+    // Auto-close after 2s so user returns to home screen
+    setTimeout(() => { try { window.close(); } catch (e) {} }, 2000);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   state = load();
   save();
   updateStreak();
   initShellWiring();
   setInterval(localReminderTick, 60 * 1000);
+  // Fire shortcut action if URL says so
+  setTimeout(handleShortcutParams, 100);
   if (state.prefs.smoke_shake) {
     // Attempt to reactivate; permission may still be granted from previous session
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission !== 'function') {
