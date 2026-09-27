@@ -1486,12 +1486,14 @@ ACTIONS['add-routine'] = (el) => openRoutineModal(null, el && el.dataset.slot);
 ACTIONS['edit-routine'] = (el) => openRoutineModal(el.dataset.id);
 ACTIONS['del-routine'] = (el) => {
   const id = el.dataset.id;
-  confirmDialog('Ștergi această activitate din rutină?', () => {
+  confirmDialog('Ștergi această activitate din rutină?', async () => {
     state.routine_items = state.routine_items.filter(x => x.id !== id);
     Object.values(state.entries).forEach(e => {
       if (e.routine) e.routine.completed = e.routine.completed.filter(x => x !== id);
     });
+    await cancelPush('activity_' + id);
     save(); toast('Șters'); render();
+    afterRoutineChange();
   });
 };
 async function afterRoutineChange() { try { await syncRoutinePushes(); } catch(e){} }
@@ -1877,9 +1879,11 @@ ACTIONS['stop-tracking'] = () => {
     state.meta.started_at = null;
     await cancelPush('bedtime');
     await cancelPush('wakeup');
-    await cancelPush('routine_morning');
-    await cancelPush('routine_noon');
-    await cancelPush('routine_evening');
+    if (state.meta.scheduled) {
+      for (const key of Object.keys(state.meta.scheduled)) {
+        if (key.startsWith('activity_') || key.startsWith('routine_')) await cancelPush(key);
+      }
+    }
     save(); toast('Contorizare oprită'); render();
   });
 };
@@ -2546,17 +2550,25 @@ async function syncSleepPushes() {
 }
 async function syncRoutinePushes() {
   if (!state.prefs.notifications || !isStarted()) return;
-  for (const slot of ['morning', 'noon', 'evening']) {
-    await cancelPush('routine_' + slot);
+  // Cancel legacy slot-level pushes
+  for (const slot of ['morning', 'noon', 'evening']) await cancelPush('routine_' + slot);
+  // Cancel per-activity pushes that no longer exist
+  if (state.meta.scheduled) {
+    for (const key of Object.keys(state.meta.scheduled)) {
+      if (key.startsWith('activity_')) {
+        const id = key.slice('activity_'.length);
+        if (!state.routine_items.some(it => it.id === id)) await cancelPush(key);
+      }
+    }
   }
-  const items = state.routine_items;
-  if (!items.length) return;
-  const slotHours = { morning: '08:00', noon: '12:00', evening: '17:00' };
-  const titles = { morning: '☀️ Rutina de dimineață', noon: '🌞 Rutina de amiază', evening: '🌙 Rutina de seară' };
-  for (const slot of ['morning', 'noon', 'evening']) {
-    const slotItems = items.filter(it => it.slot === slot);
-    if (!slotItems.length) continue;
-    await schedulePush('routine_' + slot, titles[slot], `${slotItems.length} activități te așteaptă. Deschide app-ul și bifează.`, slotHours[slot]);
+  // Schedule one push per activity at its start_time
+  const slotEmoji = { morning: '☀️', noon: '🌞', evening: '🌙' };
+  for (const item of state.routine_items) {
+    if (!item.start_time) continue;
+    await cancelPush('activity_' + item.id);
+    const title = `${slotEmoji[item.slot] || '⏰'} ${item.name}`;
+    const body  = item.end_time ? `Programat ${item.start_time}–${item.end_time}. Deschide app-ul și bifează.` : `Programat ${item.start_time}. Deschide app-ul.`;
+    await schedulePush('activity_' + item.id, title, body, item.start_time);
   }
 }
 async function sendSmokePush(count, via) {
