@@ -599,11 +599,10 @@ VIEWS.routine         = routineViewForSlot('morning');
 VIEWS.routine_noon    = routineViewForSlot('noon');
 VIEWS.routine_evening = routineViewForSlot('evening');
 
-// —— Fumat (simplu) ——
+// —— Fumat (cerc contor) ——
 VIEWS.smoking = function() {
   const e = todayEntry();
   const count = (e.smoking && e.smoking.entries) ? e.smoking.entries.length : 0;
-  const shakeOn = state.prefs.smoke_shake;
   return `
   <div class="row" style="gap:10px">
     <button class="icon-btn" data-action="back">${ICONS.back}</button>
@@ -611,32 +610,8 @@ VIEWS.smoking = function() {
     <div style="width:40px"></div>
   </div>
 
-  <div class="card" style="text-align:center;padding:28px 18px">
-    <div class="big" style="color:var(--red);font-size:56px">${count}</div>
-    <div class="subtitle mt-6">azi</div>
-    <button class="btn primary block mt-14" data-action="smoke-log">${ICONS.plus}<span>+1</span></button>
-    ${count ? `<button class="btn ghost block" data-action="smoke-undo" style="margin-top:6px">Anulează</button>` : ''}
-  </div>
-
-  <div class="card" style="padding:14px">
-    <div class="spread">
-      <div style="flex:1">
-        <div style="font-weight:600;font-size:14px">Agită 5× → +1 țigară</div>
-        <div class="subtitle mt-6">${shakeOn ? 'Activ. Ține app-ul deschis și agită telefonul de 5 ori rapid.' : 'Activează din Setari → Activează tot.'}</div>
-      </div>
-      <span class="chip ${shakeOn ? 'green' : 'red'}">${shakeOn ? 'Activ' : 'Oprit'}</span>
-    </div>
-    ${shakeOn ? `<button class="btn ghost block mt-10" data-action="shake-test">${ICONS.plus}<span>Simulează agitare</span></button>` : `<button class="btn ghost block mt-10" data-view="settings">${ICONS.bell}<span>Deschide Setări</span></button>`}
-  </div>
-
-  <div class="card" style="padding:14px;border-color:var(--green);background:linear-gradient(135deg,rgba(34,197,94,.08),transparent)">
-    <div style="font-weight:600;font-size:14px">🔥 Iconiță shortcut — 1 tap → +1 țigară</div>
-    <div class="subtitle mt-6">
-      Pune o iconiță <b>🚬 +1</b> pe home screen. 1 tap = țigară înregistrată, app-ul se închide singur. Merge și din alt app / cu telefonul blocat (după deblocare).<br><br>
-      <b>Android — automat:</b> dacă ai instalat PWA-ul, apasă lung pe iconița Dragon Life → selectezi <b>+1 țigară</b>. Sau trage-l pe home screen din meniu.<br><br>
-      <b>Manual (orice telefon):</b> apasă butonul de mai jos, apoi în browser → <i>Add to Home Screen</i>. Botezi iconița <b>🚬 +1</b>.
-    </div>
-    <button class="btn ghost block mt-10" data-action="open-smoke-shortcut">${ICONS.download}<span>Deschide URL-ul shortcut</span></button>
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 0">
+    <button class="smoke-circle" data-action="smoke-log" aria-label="+1 țigară">${count}</button>
   </div>
   `;
 };

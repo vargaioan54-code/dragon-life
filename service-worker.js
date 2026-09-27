@@ -1,7 +1,7 @@
 // OneSignal handles push events + notifications
 importScripts("https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js");
 
-const VERSION = 'dl-v50-smoke-shortcut'
+const VERSION = 'dl-v51-smoke-circle-only'
 const CACHE = 'dragonlife-' + VERSION;
 const ASSETS = [
   './',

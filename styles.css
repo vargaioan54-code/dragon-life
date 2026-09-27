@@ -546,6 +546,22 @@ textarea.input { resize: vertical; min-height: 92px; }
 .subtitle { font-size: 12px; color: var(--text-dim); }
 .divider { height: 1px; background: var(--border); margin: 10px 0; }
 
+/* Smoke counter circle */
+.smoke-circle {
+  width: 220px; height: 220px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, rgba(239,68,68,.28), rgba(239,68,68,.08));
+  border: 3px solid var(--red);
+  color: var(--red);
+  font-size: 88px; font-weight: 800; letter-spacing: -2px;
+  cursor: pointer; user-select: none;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .1s ease, box-shadow .2s ease;
+  box-shadow: 0 10px 40px rgba(239,68,68,.25), inset 0 2px 12px rgba(239,68,68,.15);
+}
+.smoke-circle:active { transform: scale(.96); box-shadow: 0 4px 16px rgba(239,68,68,.4), inset 0 2px 12px rgba(239,68,68,.25); }
+.smoke-circle:hover { box-shadow: 0 12px 48px rgba(239,68,68,.35), inset 0 2px 12px rgba(239,68,68,.2); }
+
 /* Timer (relaxation) */
 .timer-face {
   width: 220px; height: 220px; margin: 12px auto;
