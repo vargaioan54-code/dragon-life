@@ -388,7 +388,6 @@ const VIEW_TITLES = {
   relax: 'Relaxare',
   stats: 'Statistici',
   settings: 'Setări',
-  more: 'Mai mult',
 };
 
 const VIEWS = {}; // filled below
@@ -495,7 +494,7 @@ VIEWS.dashboard = function() {
           <div class="subtitle mt-6">Configurează obiceiurile, rutinele, orele de somn — apoi apasă <b>Pornește</b> în Setări. De atunci, totul se va înregistra doar cu date reale.</div>
         </div>
       </div>
-      <button class="btn primary block mt-10" data-view="more">${ICONS.play}<span>Deschide Mai mult</span></button>
+      <button class="btn primary block mt-10" data-view="settings">${ICONS.play}<span>Deschide Setări</span></button>
     </div>
   ` : ''}
 
@@ -1300,6 +1299,30 @@ VIEWS.settings = function() {
 
   <button class="btn primary block" data-action="enable-all" style="margin:8px 0 8px">${ICONS.bell}<span>Activează notificările</span></button>
 
+  ${started ? `
+    <div class="card" style="border-color:var(--green);background:linear-gradient(135deg,rgba(34,197,94,.1),transparent)">
+      <div class="row" style="gap:12px">
+        <div class="m-icon">${ICONS.check}</div>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:14px">Contorizare activă</div>
+          <div class="subtitle mt-6">Pornită pe ${sinceTxt}.</div>
+        </div>
+      </div>
+      <button class="btn ghost block mt-10" data-action="stop-tracking">${ICONS.pause}<span>Oprire contorizare</span></button>
+    </div>
+  ` : `
+    <div class="card" style="border-color:var(--amber);background:linear-gradient(135deg,rgba(245,158,11,.12),transparent)">
+      <div class="row" style="gap:12px">
+        <div class="m-icon amber">${ICONS.play}</div>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:14px">Contorizare oprită</div>
+          <div class="subtitle mt-6">Configurează, apoi apasă Pornește.</div>
+        </div>
+      </div>
+      <button class="btn primary block mt-10" data-action="start-tracking">${ICONS.play}<span>Pornește contorizarea</span></button>
+    </div>
+  `}
+
   <div class="card" style="padding:12px;margin-bottom:14px">
     <div style="font-weight:600;font-size:13px;margin-bottom:8px">Diagnostic notificări</div>
     <div class="subtitle" style="font-family:monospace;font-size:11px;line-height:1.6">
@@ -1334,59 +1357,7 @@ VIEWS.settings = function() {
   }
 };
 
-// —— More menu (bottom nav) ——
-VIEWS.more = function() {
-  const items = [
-    ['sleep','Somn','moon','blue'],
-    ['mood','Stare zilnică','smile','green'],
-    ['nutrition','Nutriție','meal','amber'],
-    ['activity','Activitate fizică','activity','purple'],
-    ['habits','Obiceiuri','target','green'],
-    ['relax','Relaxare','heart','pink'],
-    ['stats','Statistici','list','cyan'],
-    ['settings','Setări','shield',''],
-  ];
-  const started = isStarted();
-  const sdate = started ? state.meta.started_at : null;
-  const sinceTxt = sdate ? fmtDateFull(sdate.slice(0,10)) : '';
-  return `
-  <h1>Mai mult</h1>
-  <p class="subtitle">Restul secțiunilor din aplicație.</p>
 
-  ${started ? `
-    <div class="card mt-14" style="border-color:var(--green);background:linear-gradient(135deg,rgba(34,197,94,.1),transparent)">
-      <div class="row" style="gap:12px">
-        <div class="m-icon">${ICONS.check}</div>
-        <div style="flex:1">
-          <div style="font-weight:700;font-size:14px">Contorizare activă</div>
-          <div class="subtitle mt-6">Pornită pe ${sinceTxt}. Toate datele se înregistrează doar din acest moment.</div>
-        </div>
-      </div>
-      <button class="btn ghost block mt-10" data-action="stop-tracking">${ICONS.pause}<span>Oprire contorizare</span></button>
-    </div>
-  ` : `
-    <div class="card mt-14" style="border-color:var(--amber);background:linear-gradient(135deg,rgba(245,158,11,.12),transparent)">
-      <div class="row" style="gap:12px">
-        <div class="m-icon amber">${ICONS.play}</div>
-        <div style="flex:1">
-          <div style="font-weight:700;font-size:14px">Contorizare oprită</div>
-          <div class="subtitle mt-6">Configurează obiceiuri, rutine, alarme, obiective — apoi apasă Pornește.</div>
-        </div>
-      </div>
-      <button class="btn primary block mt-10" data-action="start-tracking">${ICONS.play}<span>Pornește contorizarea</span></button>
-    </div>
-  `}
-
-  <div class="grid-2 mt-14">
-    ${items.map(([v,label,icon,color]) => `
-      <div class="card tap" data-view="${v}" style="min-height:110px;display:flex;flex-direction:column;justify-content:space-between">
-        <div class="m-icon ${color}">${ICONS[icon]}</div>
-        <div style="font-weight:600;font-size:14px">${label}</div>
-      </div>
-    `).join('')}
-  </div>
-  `;
-};
 
 // ─── action wiring (event delegation) ──────────────────────────────────────
 function wireViewActions() {

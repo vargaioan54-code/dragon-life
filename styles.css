@@ -175,7 +175,7 @@ a { color: inherit; text-decoration: none; }
   position: fixed; left: 50%; transform: translateX(-50%);
   bottom: 0;
   width: 100%; max-width: 460px;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(4, 1fr);
   gap: 4px;
   padding: 8px 8px calc(10px + env(safe-area-inset-bottom));
   background: rgba(11, 18, 32, .94);

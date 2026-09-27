@@ -1,7 +1,7 @@
 // OneSignal handles push events + notifications
 importScripts("https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.sw.js");
 
-const VERSION = 'dl-v53-scheduled-tasks'
+const VERSION = 'dl-v54-no-more-button'
 const CACHE = 'dragonlife-' + VERSION;
 const ASSETS = [
   './',
