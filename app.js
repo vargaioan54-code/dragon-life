@@ -603,7 +603,7 @@ VIEWS.routine_evening = routineViewForSlot('evening');
 VIEWS.smoking = function() {
   const e = todayEntry();
   const count = (e.smoking && e.smoking.entries) ? e.smoking.entries.length : 0;
-  const startedApp = isStarted();
+  const shakeOn = state.prefs.smoke_shake;
   return `
   <div class="row" style="gap:10px">
     <button class="icon-btn" data-action="back">${ICONS.back}</button>
@@ -614,9 +614,19 @@ VIEWS.smoking = function() {
   <div class="card" style="text-align:center;padding:28px 18px">
     <div class="big" style="color:var(--red);font-size:56px">${count}</div>
     <div class="subtitle mt-6">azi</div>
-    <button class="btn primary block mt-14" data-action="smoke-log" ${!startedApp ? 'disabled' : ''}>${ICONS.plus}<span>+1</span></button>
+    <button class="btn primary block mt-14" data-action="smoke-log">${ICONS.plus}<span>+1</span></button>
     ${count ? `<button class="btn ghost block" data-action="smoke-undo" style="margin-top:6px">Anulează</button>` : ''}
-    <div class="subtitle mt-14"><a class="link" data-view="more" style="color:var(--green);cursor:pointer">Setări Fumat →</a></div>
+  </div>
+
+  <div class="card" style="padding:14px">
+    <div class="spread">
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:14px">Agită 5× → +1 țigară</div>
+        <div class="subtitle mt-6">${shakeOn ? 'Activ. Ține app-ul deschis și agită telefonul de 5 ori rapid.' : 'Activează din Setari → Activează tot.'}</div>
+      </div>
+      <span class="chip ${shakeOn ? 'green' : 'red'}">${shakeOn ? 'Activ' : 'Oprit'}</span>
+    </div>
+    ${shakeOn ? `<button class="btn ghost block mt-10" data-action="shake-test">${ICONS.plus}<span>Simulează agitare</span></button>` : `<button class="btn ghost block mt-10" data-view="settings">${ICONS.bell}<span>Deschide Setări</span></button>`}
   </div>
   `;
 };
@@ -1597,7 +1607,7 @@ ACTIONS['add-sleep'] = () => openSleepModal();
 
 // —— Smoking ——
 ACTIONS['smoke-log'] = (el, ev, opts = {}) => {
-  if (!requireStarted()) return;
+  // No requireStarted gate: smoking tracking is independent of general tracking.
   const e = todayEntry();
   if (!e.smoking) e.smoking = { entries: [] };
   if (!e.smoking.entries) e.smoking.entries = [];
@@ -1608,8 +1618,9 @@ ACTIONS['smoke-log'] = (el, ev, opts = {}) => {
   const body = `Ai fumat astăzi ${n} țigări${via ? ' · înregistrat prin agitare' : ''}.`;
   toast(`țigară #${n}${via}`);
   notify('🚬 țigară înregistrată', body);
+  if (navigator.vibrate) navigator.vibrate([100, 60, 100]);
   if ('Notification' in window && Notification.permission === 'granted') {
-    try { new Notification('🚬 țigară #' + n, { body, icon: 'icon.svg', tag: 'smoke', renotify: true }); } catch (e) {}
+    try { new Notification('🚬 țigară #' + n, { body, icon: 'icon.svg', tag: 'smoke_' + n, renotify: true }); } catch (e) {}
   }
   if (state.prefs.smoke_flash) blinkFlashlight();
   sendSmokePush(n, opts.src);
@@ -1620,6 +1631,10 @@ ACTIONS['smoke-undo'] = () => {
   if (!e.smoking || !e.smoking.entries || !e.smoking.entries.length) return;
   e.smoking.entries.pop();
   save(); toast('Anulat'); render();
+};
+ACTIONS['shake-test'] = () => {
+  // Simulate a shake trigger to verify the full pipeline works
+  ACTIONS['smoke-log'](null, null, { src: 'shake' });
 };
 
 ACTIONS['sleep-bed'] = () => {
