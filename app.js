@@ -810,7 +810,7 @@ VIEWS.mood = function() {
 
   <div class="field">
     <label>Notițe (opțional)</label>
-    <textarea class="input" id="moodNote" placeholder="Ce s-a întâmplat azi?">${esc(cur.note || '')}</textarea>
+    <textarea class="input" id="moodNote" placeholder="">${esc(cur.note || '')}</textarea>
   </div>
 
   <button class="btn primary block" data-action="mood-save">Salvează</button>
@@ -1443,14 +1443,14 @@ function openCardModal(id) {
   const cur = editing || { title: '', subtitle: '', icon: 'plus', color: 'green', link: '', note: '' };
   openModal(`
     <div class="modal-head"><h3>${editing ? 'Editează' : 'Adaugă'} card</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
-    <div class="field"><label>Titlu</label><input class="input" id="ccT" value="${esc(cur.title)}" placeholder="Ex. Antrenament de seară"/></div>
-    <div class="field"><label>Subtitlu (opțional)</label><input class="input" id="ccS" value="${esc(cur.subtitle)}" placeholder="Ex. 30 minute, după cină"/></div>
+    <div class="field"><label>Titlu</label><input class="input" id="ccT" value="${esc(cur.title)}" placeholder=""/></div>
+    <div class="field"><label>Subtitlu (opțional)</label><input class="input" id="ccS" value="${esc(cur.subtitle)}" placeholder=""/></div>
     <div class="grid-2">
       <div class="field"><label>Icon</label><select class="input" id="ccI">${CARD_ICONS.map(k => `<option value="${k}" ${cur.icon===k?'selected':''}>${k}</option>`).join('')}</select></div>
       <div class="field"><label>Culoare</label><select class="input" id="ccC">${CARD_COLORS.map(k => `<option value="${k}" ${cur.color===k?'selected':''}>${k}</option>`).join('')}</select></div>
     </div>
     <div class="field"><label>Acțiune la tap</label><select class="input" id="ccL">${CARD_LINKS.map(([v,l]) => `<option value="${v}" ${cur.link===v?'selected':''}>${l}</option>`).join('')}</select></div>
-    <div class="field"><label>Notă (opțional, apare la tap dacă n-are link)</label><textarea class="input" id="ccN" placeholder="Text personalizat">${esc(cur.note)}</textarea></div>
+    <div class="field"><label>Notă (opțional, apare la tap dacă n-are link)</label><textarea class="input" id="ccN" placeholder="">${esc(cur.note)}</textarea></div>
     <div class="row" style="gap:8px">
       <button class="btn primary block" id="ccSave">${editing ? 'Salvează' : 'Adaugă'}</button>
       ${editing ? `<button class="btn danger" id="ccDel">${ICONS.trash}</button>` : ''}
@@ -1520,8 +1520,8 @@ function openRoutineModal(editId, defaultSlot) {
   const endVal   = editing && editing.end_time ? editing.end_time : addMinutesToTime(startVal, editing ? (editing.duration || 15) : 15);
   openModal(`
     <div class="modal-head"><h3>${editing ? 'Editează' : 'Adaugă'} activitate</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
-    <div class="field"><label>Nume</label><input class="input" id="rN" value="${esc(editing ? editing.name : '')}" placeholder="Ex. Hidratare"/></div>
-    <div class="field"><label>Descriere</label><input class="input" id="rD" value="${esc(editing ? editing.desc : '')}" placeholder="Ex. 1 pahar cu apă"/></div>
+    <div class="field"><label>Nume</label><input class="input" id="rN" value="${esc(editing ? editing.name : '')}" placeholder=""/></div>
+    <div class="field"><label>Descriere</label><input class="input" id="rD" value="${esc(editing ? editing.desc : '')}" placeholder=""/></div>
     <div class="field"><label>Interval</label><select class="input" id="rS">
       <option value="morning" ${slot==='morning'?'selected':''}>Dimineață (8–12)</option>
       <option value="noon"    ${slot==='noon'?'selected':''}>Amiază (12–17)</option>
@@ -1780,15 +1780,15 @@ function openMealModal() {
   const iso = viewState.date || todayISO();
   openModal(`
     <div class="modal-head"><h3>Adaugă masă</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
-    <div class="field"><label>Nume</label><input class="input" id="mN" placeholder="Ex. Mic dejun · omletă"/></div>
+    <div class="field"><label>Nume</label><input class="input" id="mN" placeholder=""/></div>
     <div class="grid-2">
       <div class="field"><label>Ora</label><input class="input" id="mT" type="time" value="${pad2(new Date().getHours())}:${pad2(new Date().getMinutes())}"/></div>
-      <div class="field"><label>Calorii</label><input class="input" id="mK" type="number" min="0" placeholder="450"/></div>
+      <div class="field"><label>Calorii</label><input class="input" id="mK" type="number" min="0" placeholder=""/></div>
     </div>
     <div class="grid-3">
-      <div class="field"><label>Proteine (g)</label><input class="input" id="mP" type="number" min="0" placeholder="25"/></div>
-      <div class="field"><label>Carbo (g)</label><input class="input" id="mC" type="number" min="0" placeholder="55"/></div>
-      <div class="field"><label>Grăsimi (g)</label><input class="input" id="mF" type="number" min="0" placeholder="12"/></div>
+      <div class="field"><label>Proteine (g)</label><input class="input" id="mP" type="number" min="0" placeholder=""/></div>
+      <div class="field"><label>Carbo (g)</label><input class="input" id="mC" type="number" min="0" placeholder=""/></div>
+      <div class="field"><label>Grăsimi (g)</label><input class="input" id="mF" type="number" min="0" placeholder=""/></div>
     </div>
     <button class="btn primary block" id="mSave">Adaugă</button>
   `);
@@ -1902,8 +1902,8 @@ function openJournalModal(id, iso) {
   openModal(`
     <div class="modal-head"><h3>${existing ? 'Editează' : 'Adaugă'} intrare</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
     <div class="subtitle mb-10">${fmtDateFull(iso)}</div>
-    <div class="field"><label>Titlu</label><input class="input" id="jT" value="${esc(existing ? existing.title : '')}" placeholder="Ex. Reflecția zilei"/></div>
-    <div class="field"><label>Notă</label><textarea class="input" id="jB" style="min-height:160px" placeholder="Ce s-a întâmplat, ce simți?">${esc(existing ? existing.body : '')}</textarea></div>
+    <div class="field"><label>Titlu</label><input class="input" id="jT" value="${esc(existing ? existing.title : '')}" placeholder=""/></div>
+    <div class="field"><label>Notă</label><textarea class="input" id="jB" style="min-height:160px" placeholder="">${esc(existing ? existing.body : '')}</textarea></div>
     <div class="row" style="gap:8px">
       <button class="btn primary block" id="jSave">${existing ? 'Salvează' : 'Adaugă'}</button>
       ${existing ? `<button class="btn danger" id="jDel">${ICONS.trash}</button>` : ''}
@@ -1948,7 +1948,7 @@ function openHabitModal(id) {
   const editing = id ? state.habits.find(h => h.id === id) : null;
   openModal(`
     <div class="modal-head"><h3>${editing ? 'Editează' : 'Adaugă'} obicei</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
-    <div class="field"><label>Nume</label><input class="input" id="hN" value="${esc(editing ? editing.name : '')}" placeholder="Ex. Meditez 10 min"/></div>
+    <div class="field"><label>Nume</label><input class="input" id="hN" value="${esc(editing ? editing.name : '')}" placeholder=""/></div>
     <div class="grid-2">
       <div class="field"><label>Frecvență</label><select class="input" id="hF">
         <option value="daily" ${editing && editing.freq==='daily'?'selected':''}>Zilnic</option>
