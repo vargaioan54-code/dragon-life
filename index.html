@@ -24,7 +24,9 @@
           serviceWorkerPath: "service-worker.js",
           serviceWorkerParam: { scope: "/" },
           allowLocalhostAsSecureOrigin: true,
-          notifyButton: { enable: false }
+          notifyButton: { enable: false },
+          promptOptions: { slidedown: { prompts: [] } },
+          autoResubscribe: true
         });
         window.__DL_ONESIGNAL_READY = true;
         window.dispatchEvent(new Event('onesignal-ready'));

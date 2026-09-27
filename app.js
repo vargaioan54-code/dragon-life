@@ -83,7 +83,7 @@ const DEFAULT_STATE = {
   relax_items: [],
   custom_cards: [],         // user-built Dashboard cards
   entries: {},              // { isoDate: { sleep, mood, nutrition, activity, routine, journal, habits_done } }
-  meta: { last_seen: todayISO(), streak_days: 1, created_at: todayISO(), data_version: DATA_VERSION, started_at: null, push_id: null, scheduled: {} },
+  meta: { last_seen: todayISO(), streak_days: 1, created_at: todayISO(), data_version: DATA_VERSION, started_at: null, push_id: null, scheduled: {}, notif_prompted: false },
   notifs: [],
   current_sleep: null,       // { bedtime_ts, bedtime_hhmm, iso_day } | null — live sleep session
 };
@@ -580,11 +580,13 @@ function routineViewForSlot(slot) {
     `;
 
     function routineRow(item, done) {
+      const timeTxt = item.start_time && item.end_time ? `${item.start_time}–${item.end_time}` : `${item.duration || 5} min`;
+      const descTxt = item.desc ? `${esc(item.desc)} · ${timeTxt}` : timeTxt;
       return `<div class="list-row ${done ? 'done' : ''}" data-action="toggle-routine" data-id="${item.id}">
         <div class="icn ${done ? 'done' : ''}">${done ? ICONS.check : (ICONS[item.icon] || ICONS.check)}</div>
         <div>
           <div class="title">${esc(item.name)}</div>
-          <div class="sub">${esc(item.desc)} · ${item.duration} min</div>
+          <div class="sub">${descTxt}</div>
         </div>
         <div class="row" style="gap:4px">
           <button class="icon-btn" style="width:32px;height:32px;background:transparent;border:0" data-action="edit-routine" data-id="${item.id}" aria-label="Editează">${ICONS.edit}</button>
@@ -1495,35 +1497,73 @@ ACTIONS['del-routine'] = (el) => {
   });
 };
 async function afterRoutineChange() { try { await syncRoutinePushes(); } catch(e){} }
+function slotDefaultStart(slot) {
+  return { morning: '08:00', noon: '12:00', evening: '17:00' }[slot] || '08:00';
+}
+function addMinutesToTime(hhmm, minutes) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const total = h * 60 + m + minutes;
+  const nh = Math.floor(total / 60) % 24, nm = total % 60;
+  return `${pad2(nh)}:${pad2(nm)}`;
+}
+function minutesFromTimes(start, end) {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  let diff = (eh * 60 + em) - (sh * 60 + sm);
+  if (diff < 0) diff += 24 * 60;
+  return diff;
+}
 function openRoutineModal(editId, defaultSlot) {
   const editing = editId ? state.routine_items.find(x => x.id === editId) : null;
   const slot = editing ? editing.slot : (defaultSlot || currentSlot());
+  const startVal = editing && editing.start_time ? editing.start_time : slotDefaultStart(slot);
+  const endVal   = editing && editing.end_time ? editing.end_time : addMinutesToTime(startVal, editing ? (editing.duration || 15) : 15);
   openModal(`
     <div class="modal-head"><h3>${editing ? 'Editează' : 'Adaugă'} activitate</h3><button class="modal-close" onclick="DL.close()">${ICONS.close}</button></div>
     <div class="field"><label>Nume</label><input class="input" id="rN" value="${esc(editing ? editing.name : '')}" placeholder="Ex. Hidratare"/></div>
     <div class="field"><label>Descriere</label><input class="input" id="rD" value="${esc(editing ? editing.desc : '')}" placeholder="Ex. 1 pahar cu apă"/></div>
+    <div class="field"><label>Interval</label><select class="input" id="rS">
+      <option value="morning" ${slot==='morning'?'selected':''}>Dimineață (8–12)</option>
+      <option value="noon"    ${slot==='noon'?'selected':''}>Amiază (12–17)</option>
+      <option value="evening" ${slot==='evening'?'selected':''}>Seară (17–22)</option>
+    </select></div>
     <div class="grid-2">
-      <div class="field"><label>Interval</label><select class="input" id="rS">
-        <option value="morning" ${slot==='morning'?'selected':''}>Dimineață (8–12)</option>
-        <option value="noon"    ${slot==='noon'?'selected':''}>Amiază (12–17)</option>
-        <option value="evening" ${slot==='evening'?'selected':''}>Seară (17–22)</option>
-      </select></div>
-      <div class="field"><label>Durată (min)</label><input class="input" id="rM" type="number" min="1" max="120" value="${editing ? editing.duration : 5}"/></div>
+      <div class="field"><label>Ora de început</label><input class="input" id="rStart" type="time" value="${startVal}"/></div>
+      <div class="field"><label>Ora de sfârșit</label><input class="input" id="rEnd" type="time" value="${endVal}"/></div>
     </div>
     <div class="field"><label>Culoare</label><select class="input" id="rC">
       ${['green','blue','amber','purple','pink','cyan','red'].map(c => `<option value="${c}" ${editing && editing.color===c?'selected':''}>${c}</option>`).join('')}
     </select></div>
     <button class="btn primary block" id="rSave">${editing ? 'Salvează' : 'Adaugă'}</button>
   `);
+  // when slot changes, snap start time to slot start
+  $('#rS').addEventListener('change', () => {
+    const newSlot = $('#rS').value;
+    const s = slotDefaultStart(newSlot);
+    const currDur = minutesFromTimes($('#rStart').value, $('#rEnd').value);
+    $('#rStart').value = s;
+    $('#rEnd').value = addMinutesToTime(s, currDur || 15);
+  });
+  // when start changes, keep the same duration on end
+  let lastStart = startVal, lastEnd = endVal;
+  $('#rStart').addEventListener('change', () => {
+    const dur = minutesFromTimes(lastStart, lastEnd);
+    lastStart = $('#rStart').value;
+    $('#rEnd').value = addMinutesToTime(lastStart, dur || 15);
+    lastEnd = $('#rEnd').value;
+  });
+  $('#rEnd').addEventListener('change', () => { lastEnd = $('#rEnd').value; });
   $('#rSave').onclick = () => {
     const name = $('#rN').value.trim();
     const desc = $('#rD').value.trim();
-    const duration = parseInt($('#rM').value, 10) || 5;
     const color = $('#rC').value;
     const slot = $('#rS').value;
+    const start_time = $('#rStart').value;
+    const end_time   = $('#rEnd').value;
+    const duration   = minutesFromTimes(start_time, end_time);
     if (!name) return toast('Numele e obligatoriu');
-    if (editing) Object.assign(editing, { name, desc, duration, color, slot });
-    else state.routine_items.push({ id: uid(), name, desc, duration, color, slot, icon: 'list' });
+    if (editing) Object.assign(editing, { name, desc, duration, color, slot, start_time, end_time });
+    else state.routine_items.push({ id: uid(), name, desc, duration, color, slot, start_time, end_time, icon: 'list' });
     save(); closeModal(); toast(editing ? 'Actualizat' : 'Adăugat'); render();
     afterRoutineChange();
   };
@@ -2077,12 +2117,12 @@ ACTIONS['edit-notifs'] = () => {
     p.bedtime = $('#nB').value || '22:00';
     p.wakeup  = $('#nW').value || '08:00';
     p.notifications = $('#nOn').checked;
-    if (p.notifications) await registerPushUser();
+    if (p.notifications) await registerPushUser({ prompt: true });
     save(); closeModal(); toast('Alarme salvate — culcare ' + p.bedtime + ' · trezire ' + p.wakeup);
     await syncSleepPushes();
   };
   $('#nTest').onclick = async () => {
-    const externalId = await registerPushUser();
+    const externalId = await registerPushUser({ prompt: true });
     if (!externalId) { toast('Permite notificările mai întâi'); return; }
     try {
       const r = await fetch(API_BASE + '/api?action=test', {
@@ -2348,23 +2388,23 @@ async function waitOneSignal(timeoutMs = 6000) {
     window.addEventListener('onesignal-ready', () => { if (!done) { done = true; clearTimeout(t); resolve(true); } }, { once: true });
   });
 }
-async function registerPushUser() {
+async function registerPushUser({ prompt = false } = {}) {
   const ready = await waitOneSignal();
   if (!ready) return null;
   try {
     const OS = window.OneSignal;
     if (Notification.permission === 'default') {
+      if (!prompt) return null; // silent skip — caller must opt in explicitly
       await OS.Notifications.requestPermission();
+      state.meta.notif_prompted = true; save();
     }
     if (Notification.permission !== 'granted') return null;
     if (!state.meta.push_id) state.meta.push_id = 'dl_' + uid();
     await OS.login(state.meta.push_id);
-    // Ensure user is opted in for push
     try {
       const sub = OS.User && OS.User.PushSubscription;
       if (sub && !sub.optedIn && typeof sub.optIn === 'function') await sub.optIn();
     } catch (e) {}
-    // Wait until push subscription id is available (up to 5s)
     for (let i = 0; i < 20; i++) {
       try {
         const sid = OS.User && OS.User.PushSubscription && OS.User.PushSubscription.id;
@@ -2375,6 +2415,31 @@ async function registerPushUser() {
     save();
     return state.meta.push_id;
   } catch (e) { return null; }
+}
+
+function openWelcomePrompt() {
+  openModal(`
+    <div class="modal-head"><h3>🐉 Bine ai venit în Dragon Life</h3></div>
+    <p class="subtitle">Ca să primiți alarmele de culcare / trezire, mementourile pentru rutine și confirmările de țigară <b>chiar și când app-ul e închis</b>, activează notificările.</p>
+    <p class="subtitle" style="margin-top:10px">Vom întreba o singură dată. Poți schimba oricând din Setări.</p>
+    <div class="row" style="gap:8px;margin-top:14px">
+      <button class="btn ghost block" id="wLater">Mai târziu</button>
+      <button class="btn primary block" id="wEnable">${ICONS.bell}<span>Activează</span></button>
+    </div>
+  `, { center: true });
+  $('#wLater').onclick = () => {
+    state.meta.notif_prompted = true; save(); closeModal();
+  };
+  $('#wEnable').onclick = async () => {
+    closeModal();
+    const id = await registerPushUser({ prompt: true });
+    if (id) {
+      toast('Notificările sunt active ✅');
+      if (isStarted()) { await syncSleepPushes(); await syncRoutinePushes(); }
+    } else {
+      toast('Notificările rămân dezactivate — le poți activa din Setări');
+    }
+  };
 }
 function nextOccurrenceISO(hhmm) {
   const [h, m] = hhmm.split(':').map(Number);
@@ -2474,10 +2539,17 @@ document.addEventListener('DOMContentLoaded', async () => {
       startShakeDetection();
     }
   }
-  // Register with OneSignal + refresh scheduled pushes so they fire while app is closed
-  if (isStarted() && state.prefs.notifications) {
-    try { await syncSleepPushes(); } catch (e) {}
-    try { await syncRoutinePushes(); } catch (e) {}
+  // Show onboarding notification prompt exactly once, ever
+  if (!state.meta.notif_prompted && Notification.permission === 'default') {
+    setTimeout(openWelcomePrompt, 600);
+  }
+  // Register silently (no prompt) if already granted, refresh scheduled pushes
+  if (Notification.permission === 'granted') {
+    try { await registerPushUser(); } catch (e) {}
+    if (isStarted() && state.prefs.notifications) {
+      try { await syncSleepPushes(); } catch (e) {}
+      try { await syncRoutinePushes(); } catch (e) {}
+    }
   }
 });
 
